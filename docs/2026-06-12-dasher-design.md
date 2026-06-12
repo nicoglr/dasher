@@ -3,9 +3,9 @@
 Status: draft (for hand refinement)
 Date: 2026-06-12
 
-## 1. Purpose & relationship to Walker
+## 1. Purpose & relationship to WALker
 
-Dasher is the consumer counterpart to **Walker**. Walker (N processes, one per
+Dasher is the consumer counterpart to **WALker**. WALker (N processes, one per
 Postgres DB) reads committed Postgres changes via logical decoding and publishes
 one CDC event per change to a Redis Stream, with **at-least-once** delivery and
 a source `lsn` on every event.
@@ -14,14 +14,14 @@ a source `lsn` on every event.
 is **app-instance-first**, `<app-instance>.<prefix>.<rest>` — e.g.
 `bayer-17909.cdc.orders`. The leading segment is the application instance id;
 the remainder is the logical stream name (`cdc.orders`, or later something like
-`messages.billing`). This is a change from Walker's earlier `cdc.<db>.<table>`
-scheme: **Walker must be updated to emit app-instance-first keys**, where its
+`messages.billing`). This is a change from WALker's earlier `cdc.<db>.<table>`
+scheme: **WALker must be updated to emit app-instance-first keys**, where its
 leading segment equals the same instance id Dasher is configured with. See §8.
 
 Dasher reads those streams via Redis **consumer groups**, dispatches each event
 to a registered **handler**, and acks only after the handler succeeds.
 
-Two motivations, mirroring Walker:
+Two motivations, mirroring WALker:
 1. **Learn** the Redis Streams consumer-group mechanics by speaking the raw
    primitives directly (`XREADGROUP` / `XACK` / `XAUTOCLAIM`) — the same
    mechanism a library like `gtrs` wraps. The redis client is the only real
@@ -34,7 +34,7 @@ Priorities, in order: **reliable**, **simple**. Latency is not important.
 ## 2. Topology & process model
 
 **v0 runs model B: one Dasher process per application instance**, mirroring
-Walker's one-process-per-DB model: full isolation (one instance's crash-loop
+WALker's one-process-per-DB model: full isolation (one instance's crash-loop
 never stalls another), independent consumer-group/offset state, and the same
 "fail loud, supervisor restarts" supervision model. This is chosen for v0
 because it keeps the fail-loud error model (§5) trivial and gives true
@@ -46,7 +46,7 @@ per-tenant crash/deploy isolation while the instance count is small.
 - **One goroutine per watched stream**, each owning its `XREADGROUP` loop. An
   `errgroup` ties them together: a fatal error invokes the **stream error
   policy** (§5) which, in v0, cancels the shared context so the process exits
-  non-zero (supervisor restarts). This extends Walker's "one fatal error →
+  non-zero (supervisor restarts). This extends WALker's "one fatal error →
   exit" model to the N-streams-per-instance case.
 
 Axis summary:
@@ -88,7 +88,7 @@ fail-loud; only its trigger is isolated behind the policy seam.
 For each watched stream, on startup:
 
 1. `XGROUP CREATE <stream> <group> $ MKSTREAM` — ignore `BUSYGROUP` (already
-   exists). `MKSTREAM` so the group can be created before Walker has written
+   exists). `MKSTREAM` so the group can be created before WALker has written
    anything.
 2. **Reclaim** this consumer's interrupted work with `XAUTOCLAIM` (entries
    delivered but never acked because a previous process crashed), process them,
@@ -110,7 +110,7 @@ idempotent** (see §5 dedup).
 
 ## 4. Event shape & decode
 
-Walker writes each stream entry with these fields:
+WALker writes each stream entry with these fields:
 
 | Field | Meaning |
 |---|---|
@@ -139,7 +139,7 @@ type Event struct {
 
 `Data`/`Old` JSON is parsed with `json.Decoder` + `UseNumber()` so `bigint` /
 `numeric` values keep exact decimal text and are never rounded through
-`float64` (honoring Walker's consumer contract). A **malformed envelope** (an
+`float64` (honoring WALker's consumer contract). A **malformed envelope** (an
 entry that cannot be parsed into `Event`) is treated as **fatal / fail-loud** —
 it indicates a contract violation, not a transient condition — and is not
 retried.
@@ -152,7 +152,7 @@ type Handler interface {
 }
 ```
 
-Failure handling mirrors Walker's sink (transient → back-pressure; bad data →
+Failure handling mirrors WALker's sink (transient → back-pressure; bad data →
 fail loud):
 
 - returns `nil` → `XACK` the entry.
@@ -161,7 +161,7 @@ fail loud):
   in v0; surfacing poison loudly is wanted during learning.
 - returns any other non-nil error → **transient**: retry with exponential
   backoff, blocking this stream's goroutine, never acking. Back-pressure, same
-  as Walker's XADD retry. **Default for unclassified errors is transient.**
+  as WALker's XADD retry. **Default for unclassified errors is transient.**
   Dasher keeps a per-entry **retry counter** and **escalates the log level from
   `WARN` to `ERROR` after N consecutive retries** (N configurable, default
   e.g. 10), so a persistently-down downstream surfaces loudly without the
@@ -291,12 +291,12 @@ key segment *is* the instance id. (If a future deployment ever needs the key
 segment to differ from the logical id, add an optional per-instance `namespace`
 override then — additive, no v0 cost.)
 
-Walker is configured so its leading stream-key segment equals this same
-instance id (e.g. Walker for `bayer-17909` writes `bayer-17909.cdc.orders`).
+WALker is configured so its leading stream-key segment equals this same
+instance id (e.g. WALker for `bayer-17909` writes `bayer-17909.cdc.orders`).
 
 ## 9. Go package layout
 
-Flat and small, matching Walker's style. Each package has one job and a small
+Flat and small, matching WALker's style. Each package has one job and a small
 interface so it can be tested in isolation.
 
 ```
@@ -339,7 +339,7 @@ Key interfaces:
   fatal-on-poison.
 - `internal/services`: against `httptest` — assert the auth header and base URL
   wiring.
-- End-to-end smoke: bring up Walker + Dasher; `INSERT`/`UPDATE`/`DELETE` in
+- End-to-end smoke: bring up WALker + Dasher; `INSERT`/`UPDATE`/`DELETE` in
   Postgres; assert the bound handler is invoked and the entry is acked (the
   group's PEL empties).
 
@@ -365,19 +365,19 @@ Key interfaces:
    stream name listed in config (`cdc.orders`), and the stream key is
    app-instance-first (`<instance-id>.<stream>`). See §8.
 3. ~~Backoff cap / escalate-to-crash on long stalls.~~ RESOLVED: retry forever
-   (like Walker), but keep a per-entry retry counter and escalate the log level
+   (like WALker), but keep a per-entry retry counter and escalate the log level
    `WARN`→`ERROR` after N consecutive retries (counter resets on success). No
    crash on stall.
 4. Handler versioning convention (`@v1`) — free-form string vs structured.
 5. Do any handlers need ordered, cross-stream transaction grouping? (Assumed no,
-   same as Walker's per-change model.)
+   same as WALker's per-change model.)
 
 ## Decisions (rationale)
 
 - **Model B (process per instance) for v0, with seams for a cheap migration to
   model C (one process, many instances).** B keeps the fail-loud error model
   trivial and gives true per-tenant crash/deploy isolation at low instance
-  counts; it stays symmetric with Walker. C becomes attractive as instance
+  counts; it stays symmetric with WALker. C becomes attractive as instance
   count grows (fewer pods, shared resources) and is the natural shape for the
   wazero hot-swap. The five seams (§2) — C-ready keying, set-of-instances run
   layer, process-identity consumer name, `StreamErrorPolicy`, narrowing
@@ -388,7 +388,7 @@ Key interfaces:
   mechanism with server-side pending tracking and crash recovery; best learning
   value; `gtrs` wraps exactly this.
 - **Transient retry + fail-loud poison (behind a `StreamErrorPolicy` seam), no
-  DLQ** — mirrors Walker's sink and decode-error behavior; simplest; surfaces
+  DLQ** — mirrors WALker's sink and decode-error behavior; simplest; surfaces
   bad data loudly while learning. The seam lets model C later swap crash for
   per-stream quarantine without touching the consume loop.
 - **Opaque instance identity + InstanceContext** — generic, decoupled from

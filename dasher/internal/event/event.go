@@ -1,4 +1,4 @@
-// Package event parses a Redis stream entry (as produced by Walker) into a
+// Package event parses a Redis stream entry (as produced by WALker) into a
 // dasher.Event. JSON payloads are decoded with UseNumber so bigint/numeric
 // values keep exact decimal text and are never rounded through float64.
 package event
