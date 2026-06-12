@@ -2,6 +2,7 @@ package event_test
 
 import (
 	"encoding/json"
+	"errors"
 	"testing"
 	"time"
 
@@ -57,15 +58,17 @@ func TestParseUpdateWithOld(t *testing.T) {
 func TestParseMissingFieldErrors(t *testing.T) {
 	v := base()
 	delete(v, "op")
-	if _, err := event.Parse("3-0", v); err == nil {
-		t.Fatal("expected error for missing op")
+	_, err := event.Parse("3-0", v)
+	if !errors.Is(err, event.ErrMissingField) {
+		t.Fatalf("expected ErrMissingField, got %v", err)
 	}
 }
 
 func TestParseBadDataErrors(t *testing.T) {
 	v := base()
 	v["data"] = "{not json"
-	if _, err := event.Parse("4-0", v); err == nil {
-		t.Fatal("expected error for malformed data JSON")
+	_, err := event.Parse("4-0", v)
+	if !errors.Is(err, event.ErrMalformedJSON) {
+		t.Fatalf("expected ErrMalformedJSON, got %v", err)
 	}
 }

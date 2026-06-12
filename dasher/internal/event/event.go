@@ -6,10 +6,17 @@ package event
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
 	"4gclinical.com/dasher"
+)
+
+// Sentinel errors for named parse failures in Parse.
+var (
+	ErrMissingField  = errors.New("missing required field")
+	ErrMalformedJSON = errors.New("malformed JSON payload")
 )
 
 // Parse turns a stream entry (id + field map) into a dasher.Event. A malformed
@@ -57,11 +64,11 @@ func Parse(id string, values map[string]any) (dasher.Event, error) {
 func reqStr(v map[string]any, k string) (string, error) {
 	raw, ok := v[k]
 	if !ok {
-		return "", fmt.Errorf("missing field %q", k)
+		return "", fmt.Errorf("field %q: %w", k, ErrMissingField)
 	}
 	s, ok := raw.(string)
 	if !ok {
-		return "", fmt.Errorf("field %q is not a string", k)
+		return "", fmt.Errorf("field %q is not a string: %w", k, ErrMissingField)
 	}
 	return s, nil
 }
@@ -71,7 +78,7 @@ func decodeJSON(s string) (map[string]any, error) {
 	dec.UseNumber() // keep bigint/numeric as exact decimal text, never float64
 	var m map[string]any
 	if err := dec.Decode(&m); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("%w: %v", ErrMalformedJSON, err)
 	}
 	return m, nil
 }

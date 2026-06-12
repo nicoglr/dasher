@@ -1,6 +1,7 @@
 package config_test
 
 import (
+	"errors"
 	"testing"
 
 	"4gclinical.com/dasher/internal/config"
@@ -55,35 +56,40 @@ func TestLoadSelectsInstance(t *testing.T) {
 
 func TestLoadMissingInstance(t *testing.T) {
 	setEnv(t, "nope")
-	if _, err := config.Load(); err == nil {
-		t.Fatal("expected error for missing instance")
+	_, err := config.Load()
+	if !errors.Is(err, config.ErrInstanceNotFound) {
+		t.Fatalf("expected ErrInstanceNotFound, got %v", err)
 	}
 }
 
 func TestLoadRequiresInstanceID(t *testing.T) {
 	setEnv(t, "")
-	if _, err := config.Load(); err == nil {
-		t.Fatal("expected error for empty instance id")
+	_, err := config.Load()
+	if !errors.Is(err, config.ErrMissingInstanceID) {
+		t.Fatalf("expected ErrMissingInstanceID, got %v", err)
 	}
 }
 
 func TestLoadInstanceWithoutStreams(t *testing.T) {
 	setEnv(t, "empty-99999")
-	if _, err := config.Load(); err == nil {
-		t.Fatal("expected error for instance without streams")
+	_, err := config.Load()
+	if !errors.Is(err, config.ErrNoStreams) {
+		t.Fatalf("expected ErrNoStreams, got %v", err)
 	}
 }
 
 func TestLoadStreamMissingHandlerName(t *testing.T) {
 	setEnv(t, "no-handler-99998")
-	if _, err := config.Load(); err == nil {
-		t.Fatal("expected error for stream binding with empty handler")
+	_, err := config.Load()
+	if !errors.Is(err, config.ErrMissingHandlerName) {
+		t.Fatalf("expected ErrMissingHandlerName, got %v", err)
 	}
 }
 
 func TestLoadStreamMissingStreamName(t *testing.T) {
 	setEnv(t, "no-stream-name-99997")
-	if _, err := config.Load(); err == nil {
-		t.Fatal("expected error for stream binding with empty stream name")
+	_, err := config.Load()
+	if !errors.Is(err, config.ErrMissingStreamName) {
+		t.Fatalf("expected ErrMissingStreamName, got %v", err)
 	}
 }

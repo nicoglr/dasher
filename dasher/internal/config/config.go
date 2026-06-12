@@ -1,6 +1,7 @@
 package config
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"strconv"
@@ -31,6 +32,16 @@ type InstanceConfig struct {
 	Streams  []StreamBinding `yaml:"streams"`
 }
 
+// Sentinel errors for named validation failures in Load.
+var (
+	ErrMissingInstanceID  = errors.New("DASHER_INSTANCE_ID is required")
+	ErrInstanceNotFound   = errors.New("instance not found in config")
+	ErrNoStreams           = errors.New("instance has no streams")
+	ErrMissingStreamName  = errors.New("stream binding missing stream name")
+	ErrMissingHandlerName = errors.New("stream binding missing handler name")
+	ErrBadEscalateAfter   = errors.New("DASHER_ESCALATE_AFTER must be a positive integer")
+)
+
 type file struct {
 	Instances map[string]InstanceConfig `yaml:"instances"`
 }
@@ -52,7 +63,7 @@ type Config struct {
 func Load() (Config, error) {
 	instanceID := os.Getenv("DASHER_INSTANCE_ID")
 	if instanceID == "" {
-		return Config{}, fmt.Errorf("DASHER_INSTANCE_ID is required")
+		return Config{}, fmt.Errorf("load config: %w", ErrMissingInstanceID)
 	}
 
 	path := getenv("DASHER_CONFIG", "config.yaml")
@@ -67,18 +78,18 @@ func Load() (Config, error) {
 
 	inst, ok := f.Instances[instanceID]
 	if !ok {
-		return Config{}, fmt.Errorf("instance %q not found in config %q", instanceID, path)
+		return Config{}, fmt.Errorf("instance %q: %w", instanceID, ErrInstanceNotFound)
 	}
 	inst.ID = instanceID
 	if len(inst.Streams) == 0 {
-		return Config{}, fmt.Errorf("instance %q has no streams", instanceID)
+		return Config{}, fmt.Errorf("instance %q: %w", instanceID, ErrNoStreams)
 	}
 	for _, s := range inst.Streams {
 		if s.Stream == "" {
-			return Config{}, fmt.Errorf("instance %q: a stream binding is missing its stream name", instanceID)
+			return Config{}, fmt.Errorf("instance %q: %w", instanceID, ErrMissingStreamName)
 		}
 		if s.Handler == "" {
-			return Config{}, fmt.Errorf("instance %q: stream %q has no handler name", instanceID, s.Stream)
+			return Config{}, fmt.Errorf("instance %q stream %q: %w", instanceID, s.Stream, ErrMissingHandlerName)
 		}
 	}
 
@@ -86,7 +97,7 @@ func Load() (Config, error) {
 	if v := os.Getenv("DASHER_ESCALATE_AFTER"); v != "" {
 		n, err := strconv.Atoi(v)
 		if err != nil || n < 1 {
-			return Config{}, fmt.Errorf("DASHER_ESCALATE_AFTER %q must be a positive integer", v)
+			return Config{}, fmt.Errorf("DASHER_ESCALATE_AFTER %q: %w", v, ErrBadEscalateAfter)
 		}
 		escalate = n
 	}
