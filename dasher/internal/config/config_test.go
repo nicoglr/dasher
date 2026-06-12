@@ -10,7 +10,7 @@ func setEnv(t *testing.T, inst string) {
 	t.Helper()
 	t.Setenv("DASHER_INSTANCE_ID", inst)
 	t.Setenv("DASHER_CONFIG", "testdata/config.yaml")
-	t.Setenv("DASHER_REDIS_ADDR", "localhost:6380")
+	t.Setenv("DASHER_REDIS_ADDR", "localhost:6379")
 	t.Setenv("DASHER_AUTH_TOKEN", "t")
 	t.Setenv("DASHER_ESCALATE_AFTER", "")
 }
@@ -45,7 +45,7 @@ func TestLoadSelectsInstance(t *testing.T) {
 	if cfg.EscalateAfter != 10 {
 		t.Errorf("escalate after: %d", cfg.EscalateAfter)
 	}
-	if cfg.RedisAddr != "localhost:6380" {
+	if cfg.RedisAddr != "localhost:6379" {
 		t.Errorf("redis addr: %q", cfg.RedisAddr)
 	}
 	if cfg.AuthToken != "t" {
@@ -71,5 +71,19 @@ func TestLoadInstanceWithoutStreams(t *testing.T) {
 	setEnv(t, "empty-99999")
 	if _, err := config.Load(); err == nil {
 		t.Fatal("expected error for instance without streams")
+	}
+}
+
+func TestLoadStreamMissingHandlerName(t *testing.T) {
+	setEnv(t, "no-handler-99998")
+	if _, err := config.Load(); err == nil {
+		t.Fatal("expected error for stream binding with empty handler")
+	}
+}
+
+func TestLoadStreamMissingStreamName(t *testing.T) {
+	setEnv(t, "no-stream-name-99997")
+	if _, err := config.Load(); err == nil {
+		t.Fatal("expected error for stream binding with empty stream name")
 	}
 }

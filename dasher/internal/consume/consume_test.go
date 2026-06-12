@@ -113,11 +113,13 @@ func TestNoAckOnTransientError(t *testing.T) {
 	c := consume.New(rdb, stream, group, name, h, dasher.InstanceContext{}, dasher.FailLoud{}, 10)
 
 	ctx, cancel := context.WithCancel(context.Background())
-	go func() { _ = c.Run(ctx) }()
+	done := make(chan struct{})
+	go func() { defer close(done); _ = c.Run(ctx) }()
+	defer func() { cancel(); <-done }()
 
 	waitFor(t, func() bool { return atomic.LoadInt32(&h.calls) >= 1 })
 	cancel()
-	time.Sleep(50 * time.Millisecond)
+	<-done // wait for Run to exit before asserting PEL state
 	if got := pendingCount(t, rdb); got != 1 {
 		t.Fatalf("entry should remain pending (not acked), got %d", got)
 	}

@@ -20,3 +20,17 @@ instances:
       internal:
         base_url: https://empty.internal.svc
     streams: []
+  no-handler-99998:
+    services:
+      internal:
+        base_url: https://x.internal.svc
+    streams:
+      - stream: cdc.orders
+        handler: ""
+  no-stream-name-99997:
+    services:
+      internal:
+        base_url: https://x.internal.svc
+    streams:
+      - stream: ""
+        handler: order-sync@v1

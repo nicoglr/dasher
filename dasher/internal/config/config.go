@@ -73,6 +73,14 @@ func Load() (Config, error) {
 	if len(inst.Streams) == 0 {
 		return Config{}, fmt.Errorf("instance %q has no streams", instanceID)
 	}
+	for _, s := range inst.Streams {
+		if s.Stream == "" {
+			return Config{}, fmt.Errorf("instance %q: a stream binding is missing its stream name", instanceID)
+		}
+		if s.Handler == "" {
+			return Config{}, fmt.Errorf("instance %q: stream %q has no handler name", instanceID, s.Stream)
+		}
+	}
 
 	escalate := 10
 	if v := os.Getenv("DASHER_ESCALATE_AFTER"); v != "" {
@@ -90,7 +98,7 @@ func Load() (Config, error) {
 
 	return Config{
 		InstanceID:    instanceID,
-		RedisAddr:     getenv("DASHER_REDIS_ADDR", "localhost:6380"),
+		RedisAddr:     getenv("DASHER_REDIS_ADDR", "localhost:6379"),
 		AuthToken:     os.Getenv("DASHER_AUTH_TOKEN"),
 		Group:         "dasher",
 		Consumer:      consumer,

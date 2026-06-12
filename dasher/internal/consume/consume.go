@@ -19,6 +19,15 @@ import (
 	"4gclinical.com/dasher/internal/event"
 )
 
+// defaultBlockDuration is how long XREADGROUP blocks waiting for new entries
+// when the stream is empty. A non-zero value lets the loop check ctx
+// cancellation regularly without busy-waiting.
+const defaultBlockDuration = 2 * time.Second
+
+// defaultFetchCount is the maximum number of entries fetched per XREADGROUP
+// or XAUTOCLAIM call.
+const defaultFetchCount int64 = 10
+
 // Consumer reads one Redis stream via a consumer group.
 type Consumer struct {
 	rdb           *redis.Client
@@ -39,7 +48,7 @@ func New(rdb *redis.Client, stream, group, name string, h dasher.Handler,
 	return &Consumer{
 		rdb: rdb, stream: stream, group: group, name: name, handler: h,
 		inst: inst, policy: policy, escalateAfter: escalateAfter,
-		block: 2 * time.Second, count: 10,
+		block: defaultBlockDuration, count: defaultFetchCount,
 	}
 }
 
@@ -85,7 +94,13 @@ func (c *Consumer) Run(ctx context.Context) error {
 
 func (c *Consumer) ensureGroup(ctx context.Context) error {
 	err := c.rdb.XGroupCreateMkStream(ctx, c.stream, c.group, "$").Err()
-	if err != nil && !strings.Contains(err.Error(), "BUSYGROUP") {
+	if err != nil {
+		// BUSYGROUP means the group already exists — normal on restart.
+		// Redis protocol errors begin with the error code, so HasPrefix is
+		// precise enough without requiring the full message text.
+		if strings.HasPrefix(err.Error(), "BUSYGROUP") {
+			return nil
+		}
 		return fmt.Errorf("XGROUP CREATE %s: %w", c.stream, err)
 	}
 	return nil
@@ -100,6 +115,11 @@ func (c *Consumer) reclaim(ctx context.Context) error {
 			Stream:   c.stream,
 			Group:    c.group,
 			Consumer: c.name,
+			// MinIdle: 0 reclaims all PEL entries for this consumer from a
+			// previous incarnation (crash before XACK). Safe in model-B where
+			// each stream has exactly one consumer. For model-C (multiple
+			// consumers per stream) change to a non-zero idle window (e.g.
+			// 30s) to avoid stealing in-flight entries from running peers.
 			MinIdle:  0,
 			Start:    start,
 			Count:    c.count,

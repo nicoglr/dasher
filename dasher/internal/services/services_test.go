@@ -10,6 +10,14 @@ import (
 	"4gclinical.com/dasher/internal/services"
 )
 
+func TestNewReturnsNilInternalWhenBaseURLEmpty(t *testing.T) {
+	cfg := config.InstanceConfig{}
+	svc := services.New(cfg, "secret")
+	if svc.Internal != nil {
+		t.Error("expected Internal to be nil when base_url is empty")
+	}
+}
+
 func TestInternalClientWiring(t *testing.T) {
 	var gotAuth, gotPath string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

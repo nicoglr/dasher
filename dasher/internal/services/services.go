@@ -20,9 +20,6 @@ type InternalClient struct {
 	hc      *http.Client
 }
 
-// BaseURL returns the configured base URL.
-func (c *InternalClient) BaseURL() string { return c.baseURL }
-
 // Do issues an authenticated request to baseURL+path with a Bearer token.
 func (c *InternalClient) Do(ctx context.Context, method, path string, body io.Reader) (*http.Response, error) {
 	url := strings.TrimRight(c.baseURL, "/") + "/" + strings.TrimLeft(path, "/")
@@ -40,7 +37,11 @@ type Services struct {
 }
 
 // New builds the per-instance Services from config and the secret token (env).
+// Internal is nil when base_url is empty — handlers must nil-check before use.
 func New(cfg config.InstanceConfig, token string) Services {
+	if cfg.Services.Internal.BaseURL == "" {
+		return Services{}
+	}
 	return Services{Internal: &InternalClient{
 		baseURL: cfg.Services.Internal.BaseURL,
 		token:   token,
