@@ -20,6 +20,9 @@ type InternalClient struct {
 	hc      *http.Client
 }
 
+// BaseURL returns the configured base URL.
+func (c *InternalClient) BaseURL() string { return c.baseURL }
+
 // Do issues an authenticated request to baseURL+path with a Bearer token.
 func (c *InternalClient) Do(ctx context.Context, method, path string, body io.Reader) (*http.Response, error) {
 	url := strings.TrimRight(c.baseURL, "/") + "/" + strings.TrimLeft(path, "/")
