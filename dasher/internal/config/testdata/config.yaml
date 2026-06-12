@@ -1,0 +1,22 @@
+instances:
+  bayer-17909:
+    services:
+      internal:
+        base_url: https://bayer.internal.svc
+    streams:
+      - stream: cdc.orders
+        handler: order-sync@v1
+      - stream: cdc.products
+        handler: product-sync
+  beigene-22001:
+    services:
+      internal:
+        base_url: https://beigene.internal.svc
+    streams:
+      - stream: cdc.orders
+        handler: order-sync@v2
+  empty-99999:
+    services:
+      internal:
+        base_url: https://empty.internal.svc
+    streams: []
