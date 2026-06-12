@@ -1,12 +1,12 @@
-# Agent Guidelines — WALker
+# Agent Guidelines — dasher
 
 ## Definition of Done
 
 Before claiming any task complete (marking done, handing off for review, or asserting "all good"):
 
-1. **Tests pass**: `cd walker && go test ./...`
-2. **Lint clean**: `cd walker && go run github.com/golangci/golangci-lint/cmd/golangci-lint@latest run ./...`
-   — or equivalently: `cd walker && make lint`
+1. **Tests pass**: `cd dasher && go test ./...`
+2. **Lint clean**: `cd dasher && go run github.com/golangci/golangci-lint/cmd/golangci-lint@latest run ./...`
+   — or equivalently: `cd dasher && make lint`
 
 Both must be green. No exceptions.
 
