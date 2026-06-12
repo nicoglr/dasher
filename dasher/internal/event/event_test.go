@@ -5,6 +5,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
 	"4gclinical.com/dasher/internal/event"
 )
 
@@ -21,24 +24,16 @@ func base() map[string]any {
 
 func TestParseInsert(t *testing.T) {
 	evt, err := event.Parse("1-0", base())
-	if err != nil {
-		t.Fatalf("Parse: %v", err)
-	}
-	if evt.ID != "1-0" || evt.Op != "insert" || evt.Table != "orders" || evt.Schema != "public" || evt.LSN != "0/1234" {
-		t.Errorf("unexpected envelope: %+v", evt)
-	}
-	if !evt.StreamedAt.Equal(time.Date(2026, 6, 12, 10, 0, 0, 0, time.UTC)) {
-		t.Errorf("streamed_at: %v", evt.StreamedAt)
-	}
-	if evt.Data["id"] != json.Number("42") {
-		t.Errorf("data.id: %v (%T)", evt.Data["id"], evt.Data["id"])
-	}
-	if evt.Data["big"] != json.Number("12345678901234567890") {
-		t.Errorf("data.big lost precision: %v (%T)", evt.Data["big"], evt.Data["big"])
-	}
-	if evt.Old != nil {
-		t.Errorf("old should be nil for insert: %v", evt.Old)
-	}
+	require.NoError(t, err)
+	assert.Equal(t, "1-0", evt.ID)
+	assert.Equal(t, "insert", evt.Op)
+	assert.Equal(t, "orders", evt.Table)
+	assert.Equal(t, "public", evt.Schema)
+	assert.Equal(t, "0/1234", evt.LSN)
+	assert.True(t, evt.StreamedAt.Equal(time.Date(2026, 6, 12, 10, 0, 0, 0, time.UTC)))
+	assert.Equal(t, json.Number("42"), evt.Data["id"])
+	assert.Equal(t, json.Number("12345678901234567890"), evt.Data["big"])
+	assert.Nil(t, evt.Old)
 }
 
 func TestParseUpdateWithOld(t *testing.T) {
@@ -46,26 +41,20 @@ func TestParseUpdateWithOld(t *testing.T) {
 	v["op"] = "update"
 	v["old"] = `{"id":42}`
 	evt, err := event.Parse("2-0", v)
-	if err != nil {
-		t.Fatalf("Parse: %v", err)
-	}
-	if evt.Old["id"] != json.Number("42") {
-		t.Errorf("old.id: %v", evt.Old["id"])
-	}
+	require.NoError(t, err)
+	assert.Equal(t, json.Number("42"), evt.Old["id"])
 }
 
 func TestParseMissingFieldErrors(t *testing.T) {
 	v := base()
 	delete(v, "op")
-	if _, err := event.Parse("3-0", v); err == nil {
-		t.Fatal("expected error for missing op")
-	}
+	_, err := event.Parse("3-0", v)
+	require.ErrorIs(t, err, event.ErrMissingField)
 }
 
 func TestParseBadDataErrors(t *testing.T) {
 	v := base()
 	v["data"] = "{not json"
-	if _, err := event.Parse("4-0", v); err == nil {
-		t.Fatal("expected error for malformed data JSON")
-	}
+	_, err := event.Parse("4-0", v)
+	require.ErrorIs(t, err, event.ErrMalformedJSON)
 }
