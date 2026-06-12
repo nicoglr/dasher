@@ -1,4 +1,4 @@
-.PHONY: build test lint up down
+.PHONY: build test lint smoke
 
 build:
 	go build ./...
@@ -9,8 +9,5 @@ test:
 lint:
 	golangci-lint run ./...
 
-up:
-	docker compose -f ../docker-compose.yml up -d
-
-down:
-	docker compose -f ../docker-compose.yml down
+smoke: build
+	./smoke.sh

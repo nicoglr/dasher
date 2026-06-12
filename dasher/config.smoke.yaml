@@ -1,0 +1,8 @@
+instances:
+  bayer-17909:
+    services:
+      internal:
+        base_url: ""   # no downstream in smoke — Forward returns nil immediately
+    streams:
+      - stream: cdc.orders
+        handler: order-sync@v1
