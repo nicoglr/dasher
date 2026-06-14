@@ -34,3 +34,148 @@ instances:
     streams:
       - stream: ""
         handler: order-sync@v1
+  pure-transform-99990:
+    services:
+      internal:
+        base_url: https://x.internal.svc
+      db:
+        dsn_env: DASHER_TEST_DSN
+        max_conns: 4
+    lookups:
+      user_email:
+        type: sql
+        ttl: 24h
+        sql: "SELECT email FROM users WHERE id = @user_id"
+    streams:
+      - stream: cdc.user_role_grant
+        emit: enriched.user_role_grant
+        enrich:
+          - lookup: user_email
+            bind:
+              user_id: user_id
+            into: user
+            on_miss: emit_unenriched
+  enriched-terminal-99989:
+    services:
+      internal:
+        base_url: https://x.internal.svc
+      db:
+        dsn_env: DASHER_TEST_DSN
+    lookups:
+      user_email:
+        type: sql
+        sql: "SELECT email FROM users WHERE id = @user_id"
+    streams:
+      - stream: cdc.user_role_grant
+        handler: permission-sync
+        enrich:
+          - lookup: user_email
+            bind:
+              user_id: user_id
+            into: user
+  handler-and-emit-99988:
+    services:
+      internal:
+        base_url: https://x.internal.svc
+    streams:
+      - stream: cdc.orders
+        handler: order-sync@v1
+        emit: enriched.orders
+  emit-self-loop-99987:
+    services:
+      internal:
+        base_url: https://x.internal.svc
+    streams:
+      - stream: cdc.orders
+        emit: cdc.orders
+  emit-cycle-99986:
+    services:
+      internal:
+        base_url: https://x.internal.svc
+    streams:
+      - stream: cdc.orders
+        emit: enriched.orders
+      - stream: enriched.orders
+        handler: order-sync@v1
+  unknown-lookup-ref-99985:
+    services:
+      internal:
+        base_url: https://x.internal.svc
+      db:
+        dsn_env: DASHER_TEST_DSN
+    lookups:
+      user_email:
+        type: sql
+        sql: "SELECT email FROM users WHERE id = @user_id"
+    streams:
+      - stream: cdc.orders
+        emit: enriched.orders
+        enrich:
+          - lookup: nonexistent_lookup
+            bind:
+              user_id: user_id
+            into: user
+  unknown-lookup-type-99984:
+    services:
+      internal:
+        base_url: https://x.internal.svc
+    lookups:
+      user_email:
+        type: http
+        sql: "ignored"
+    streams:
+      - stream: cdc.orders
+        handler: order-sync@v1
+  enrich-no-db-99983:
+    services:
+      internal:
+        base_url: https://x.internal.svc
+    lookups:
+      user_email:
+        type: sql
+        sql: "SELECT email FROM users WHERE id = @user_id"
+    streams:
+      - stream: cdc.orders
+        emit: enriched.orders
+        enrich:
+          - lookup: user_email
+            bind:
+              user_id: user_id
+            into: user
+  bad-bind-key-99982:
+    services:
+      internal:
+        base_url: https://x.internal.svc
+      db:
+        dsn_env: DASHER_TEST_DSN
+    lookups:
+      user_email:
+        type: sql
+        sql: "SELECT email FROM users WHERE id = @user_id"
+    streams:
+      - stream: cdc.orders
+        emit: enriched.orders
+        enrich:
+          - lookup: user_email
+            bind:
+              user_id: "bad-column-name"
+            into: user
+  bad-on-miss-99981:
+    services:
+      internal:
+        base_url: https://x.internal.svc
+      db:
+        dsn_env: DASHER_TEST_DSN
+    lookups:
+      user_email:
+        type: sql
+        sql: "SELECT email FROM users WHERE id = @user_id"
+    streams:
+      - stream: cdc.orders
+        emit: enriched.orders
+        enrich:
+          - lookup: user_email
+            bind:
+              user_id: user_id
+            into: user
+            on_miss: invalid_value

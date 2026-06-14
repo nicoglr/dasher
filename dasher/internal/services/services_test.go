@@ -6,16 +6,50 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
 	"4gclinical.com/dasher/internal/config"
 	"4gclinical.com/dasher/internal/services"
 )
 
 func TestNewReturnsNilInternalWhenBaseURLEmpty(t *testing.T) {
 	cfg := config.InstanceConfig{}
-	svc := services.New(cfg, "secret")
-	if svc.Internal != nil {
-		t.Error("expected Internal to be nil when base_url is empty")
+	svc, err := services.New(context.Background(), cfg, "secret")
+	require.NoError(t, err)
+	assert.Nil(t, svc.Internal)
+}
+
+func TestNewReturnsNilDBWhenNotConfigured(t *testing.T) {
+	cfg := config.InstanceConfig{}
+	svc, err := services.New(context.Background(), cfg, "secret")
+	require.NoError(t, err)
+	assert.Nil(t, svc.DB)
+}
+
+func TestNewBadDSNReturnsError(t *testing.T) {
+	t.Setenv("DASHER_SVC_TEST_DSN", "not-a-valid-dsn://!@#")
+	cfg := config.InstanceConfig{
+		Services: config.ServicesConfig{
+			DB: config.DBConfig{DSNEnv: "DASHER_SVC_TEST_DSN"},
+		},
 	}
+	_, err := services.New(context.Background(), cfg, "")
+	require.Error(t, err)
+}
+
+func TestNewValidDSNParsesPool(t *testing.T) {
+	// A syntactically valid DSN — pool creation is lazy so no live DB needed.
+	t.Setenv("DASHER_SVC_TEST_DSN", "postgres://user:pass@localhost:5432/db")
+	cfg := config.InstanceConfig{
+		Services: config.ServicesConfig{
+			DB: config.DBConfig{DSNEnv: "DASHER_SVC_TEST_DSN", MaxConns: 2},
+		},
+	}
+	svc, err := services.New(context.Background(), cfg, "")
+	require.NoError(t, err)
+	require.NotNil(t, svc.DB)
+	svc.Close() // lazy pool, no live connection
 }
 
 func TestInternalClientWiring(t *testing.T) {
@@ -32,21 +66,14 @@ func TestInternalClientWiring(t *testing.T) {
 			Internal: config.InternalServiceConfig{BaseURL: srv.URL},
 		},
 	}
-	svc := services.New(cfg, "secret")
+	svc, err := services.New(context.Background(), cfg, "secret")
+	require.NoError(t, err)
 
 	resp, err := svc.Internal.Do(context.Background(), http.MethodGet, "/ping", nil)
-	if err != nil {
-		t.Fatalf("Do: %v", err)
-	}
+	require.NoError(t, err)
 	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusOK {
-		t.Errorf("status: %d", resp.StatusCode)
-	}
-	if gotAuth != "Bearer secret" {
-		t.Errorf("auth header: %q", gotAuth)
-	}
-	if gotPath != "/ping" {
-		t.Errorf("path: %q", gotPath)
-	}
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+	assert.Equal(t, "Bearer secret", gotAuth)
+	assert.Equal(t, "/ping", gotPath)
 }

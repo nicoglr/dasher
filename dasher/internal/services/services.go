@@ -1,14 +1,18 @@
 // Package services bundles the shared cross-consumer concerns built once per
-// process — notably an authenticated HTTP client to the internal service, with
-// base URL and bearer token pre-wired so handlers never re-implement auth.
+// process — notably an authenticated HTTP client to the internal service and
+// an optional pgxpool for sql lookups.
 package services
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"strings"
 	"time"
+
+	"github.com/jackc/pgx/v5/pgxpool"
 
 	"4gclinical.com/dasher/internal/config"
 )
@@ -34,17 +38,52 @@ func (c *InternalClient) Do(ctx context.Context, method, path string, body io.Re
 // Services is the shared capability bundle handed to handlers via InstanceContext.
 type Services struct {
 	Internal *InternalClient
+	// DB is the pgxpool for sql lookups. Nil when no DB is configured.
+	DB *pgxpool.Pool
 }
 
-// New builds the per-instance Services from config and the secret token (env).
-// Internal is nil when base_url is empty — handlers must nil-check before use.
-func New(cfg config.InstanceConfig, token string) Services {
-	if cfg.Services.Internal.BaseURL == "" {
-		return Services{}
+// New builds the per-instance Services. It takes a context (used by pgxpool
+// config parsing — pool connect is lazy, so a down DB does not fail startup).
+// Returns an error if DB config is present but invalid.
+// Internal is nil when base_url is empty.
+// DB is nil when dsn_env is not configured.
+func New(ctx context.Context, cfg config.InstanceConfig, token string) (*Services, error) {
+	svc := &Services{}
+
+	if cfg.Services.Internal.BaseURL != "" {
+		svc.Internal = &InternalClient{
+			baseURL: cfg.Services.Internal.BaseURL,
+			token:   token,
+			hc:      &http.Client{Timeout: 30 * time.Second},
+		}
 	}
-	return Services{Internal: &InternalClient{
-		baseURL: cfg.Services.Internal.BaseURL,
-		token:   token,
-		hc:      &http.Client{Timeout: 30 * time.Second},
-	}}
+
+	if cfg.Services.DB.DSNEnv != "" {
+		dsn := os.Getenv(cfg.Services.DB.DSNEnv)
+		if dsn != "" {
+			poolCfg, err := pgxpool.ParseConfig(dsn)
+			if err != nil {
+				return nil, fmt.Errorf("services: parse db dsn: %w", err)
+			}
+			maxConns := int32(cfg.Services.DB.MaxConns)
+			if maxConns <= 0 {
+				maxConns = 4
+			}
+			poolCfg.MaxConns = maxConns
+			pool, err := pgxpool.NewWithConfig(ctx, poolCfg)
+			if err != nil {
+				return nil, fmt.Errorf("services: create db pool: %w", err)
+			}
+			svc.DB = pool
+		}
+	}
+
+	return svc, nil
+}
+
+// Close releases all resources (DB pool).
+func (s *Services) Close() {
+	if s.DB != nil {
+		s.DB.Close()
+	}
 }
