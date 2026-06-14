@@ -47,7 +47,7 @@ func makeRunner(rows []lookup.Row, runErr error) *lookup.Runner {
 		Bind:       map[string]string{"user_id": "id"},
 		Into:       "user",
 	}
-	return lookup.NewRunner([]lookup.EnrichRule{rule}, lookup.NewCache(10))
+	return lookup.NewRunner([]lookup.EnrichRule{rule})
 }
 
 type fakeLookup struct {
@@ -94,7 +94,7 @@ func TestEnrich_RunnerPoison_InnerNotCalled(t *testing.T) {
 		Bind:       map[string]string{"user_id": "id"},
 		Into:       "user",
 	}
-	runner := lookup.NewRunner([]lookup.EnrichRule{rule}, lookup.NewCache(10))
+	runner := lookup.NewRunner([]lookup.EnrichRule{rule})
 	inner := &captureHandler{}
 	h := enrich.Enrich(runner, inner)
 
@@ -112,7 +112,7 @@ func TestEnrich_TransientError_Returned(t *testing.T) {
 		Bind:       map[string]string{"user_id": "id"},
 		Into:       "user",
 	}
-	runner := lookup.NewRunner([]lookup.EnrichRule{rule}, lookup.NewCache(10))
+	runner := lookup.NewRunner([]lookup.EnrichRule{rule})
 	inner := &captureHandler{}
 	h := enrich.Enrich(runner, inner)
 

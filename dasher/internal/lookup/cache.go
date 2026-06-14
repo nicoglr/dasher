@@ -42,14 +42,15 @@ func NewCache(maxEntries int) *Cache {
 	}
 }
 
-// MakeCacheKey builds a stable string key from a lookup name and bind map.
-func MakeCacheKey(lookupName string, bind map[string]any) string {
+// MakeCacheKey builds a stable string key from a bind map.
+// The lookup name is not included — the cache is per-lookup instance.
+func MakeCacheKey(bind map[string]any) string {
 	keys := make([]string, 0, len(bind))
 	for k := range bind {
 		keys = append(keys, k)
 	}
 	sort.Strings(keys)
-	key := lookupName
+	var key string
 	for _, k := range keys {
 		key += fmt.Sprintf("|%s=%T:%v", k, bind[k], bind[k])
 	}

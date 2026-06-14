@@ -72,12 +72,11 @@ func TestEndToEnd_CDCEnrichEmit(t *testing.T) {
 	fl := &fakeLookupE2E{rows: []lookup.Row{{"email": "alice@example.com"}}}
 	rule := lookup.EnrichRule{
 		LookupName: "user_by_id",
-		Lookup:     fl,
+		Lookup:     lookup.NewCachedLookup(fl, time.Minute),
 		Bind:       map[string]string{"user_id": "id"},
 		Into:       "user",
-		CacheTTL:   time.Minute,
 	}
-	runner := lookup.NewRunner([]lookup.EnrichRule{rule}, lookup.NewCache(10))
+	runner := lookup.NewRunner([]lookup.EnrichRule{rule})
 	producer := produce.New(rdb, instanceID)
 	handler := enrich.Enrich(runner, enrich.EmitAfter(producer, dstStream, dasher.Noop))
 

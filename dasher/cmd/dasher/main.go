@@ -62,19 +62,18 @@ func main() {
 	policy := dasher.FailLoud{}
 
 	// Build the lookup catalog once (each Lookup is shared across bindings).
-	resolvedLookups, resolvedTTLs, err := buildLookupCatalog(cfg.Instance, svc)
+	resolvedLookups, err := buildLookupCatalog(cfg.Instance, svc)
 	if err != nil {
 		slog.Error("build lookup catalog", "err", err)
 		os.Exit(1)
 	}
 
-	// Per-instance shared producer and cache.
+	// Per-instance shared producer.
 	producer := produce.New(rdb, cfg.InstanceID)
-	cache := lookup.NewCache(0) // default capacity
 
 	g, gctx := errgroup.WithContext(ctx)
 	for _, b := range cfg.Instance.Streams {
-		h, err := buildHandler(b, reg, producer, cache, resolvedLookups, resolvedTTLs)
+		h, err := buildHandler(b, reg, producer, resolvedLookups)
 		if err != nil {
 			slog.Error("build handler", "stream", b.Stream, "err", err)
 			os.Exit(1)
@@ -101,36 +100,52 @@ func main() {
 
 // buildLookupCatalog instantiates all catalog entries once, returning a map
 // of name → Lookup and a map of name → resolved TTL duration.
-func buildLookupCatalog(inst config.InstanceConfig, svc *services.Services) (map[string]lookup.Lookup, map[string]time.Duration, error) {
+//
+// EXTENSION POINTS — adding a new lookup type should NOT require editing this
+// function. The intended path is:
+//   1. Register a Factory under a new type name in lookup.DefaultRegistry
+//      (see lookup/sql.go init() for the pattern). The factory reads its own
+//      type-specific fields out of Spec.Raw.
+//   2. Allow the new type name in config.allowedLookupTypes.
+// The two pieces of hardwiring below are the current obstacles to that:
+//   - config.LookupSpecRaw has a typed SQL field, so the YAML schema only
+//     understands SQL. To support arbitrary params, give LookupSpecRaw a
+//     map[string]any of unknown keys (custom UnmarshalYAML) and pass it
+//     straight through as Spec.Raw.
+//   - The Raw map below is built with a hardcoded "sql" key. Once the config
+//     carries a generic map, replace this with `Raw: raw.Raw` and this
+//     function becomes fully type-agnostic.
+func buildLookupCatalog(inst config.InstanceConfig, svc *services.Services) (map[string]lookup.Lookup, error) {
 	out := make(map[string]lookup.Lookup, len(inst.Lookups))
-	ttls := make(map[string]time.Duration, len(inst.Lookups))
 	for name, raw := range inst.Lookups {
 		factory, ok := lookup.DefaultRegistry[raw.Type]
 		if !ok {
-			return nil, nil, fmt.Errorf("lookup %q: unknown type %q", name, raw.Type)
+			return nil, fmt.Errorf("lookup %q: unknown type %q", name, raw.Type)
 		}
 		var ttl time.Duration
 		if raw.TTL != "" {
 			var err error
 			ttl, err = time.ParseDuration(raw.TTL)
 			if err != nil {
-				return nil, nil, fmt.Errorf("lookup %q: invalid ttl %q: %w", name, raw.TTL, err)
+				return nil, fmt.Errorf("lookup %q: invalid ttl %q: %w", name, raw.TTL, err)
 			}
 		}
-		ttls[name] = ttl
 		spec := lookup.Spec{
 			Type: raw.Type,
 			TTL:  ttl,
-			Raw:  map[string]any{"sql": raw.SQL},
+			// HARDWIRED: only the "sql" field is forwarded. A generic
+			// map[string]any from config would let factories accept arbitrary
+			// parameters without changing this call site. See the doc comment.
+			Raw: map[string]any{"sql": raw.SQL},
 		}
 		deps := lookup.Deps{Pool: svc.DB}
 		l, err := factory(spec, deps)
 		if err != nil {
-			return nil, nil, fmt.Errorf("lookup %q: %w", name, err)
+			return nil, fmt.Errorf("lookup %q: %w", name, err)
 		}
 		out[name] = l
 	}
-	return out, ttls, nil
+	return out, nil
 }
 
 // buildHandler composes the handler chain for a binding in fixed order:
@@ -139,9 +154,7 @@ func buildHandler(
 	b config.StreamBinding,
 	reg registry.Registry,
 	producer *produce.Producer,
-	cache *lookup.Cache,
 	resolvedLookups map[string]lookup.Lookup,
-	resolvedTTLs map[string]time.Duration,
 ) (dasher.Handler, error) {
 	// Base handler: named handler or Noop for pure transforms.
 	var base dasher.Handler = dasher.Noop
@@ -173,10 +186,9 @@ func buildHandler(
 				Lookup:     l,
 				Bind:       rule.Bind,
 				Into:       rule.Into,
-				CacheTTL:   resolvedTTLs[rule.Lookup],
 			})
 		}
-		runner := lookup.NewRunner(rules, cache)
+		runner := lookup.NewRunner(rules)
 		h = enrich.Enrich(runner, h)
 	}
 

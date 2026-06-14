@@ -75,6 +75,10 @@ func init() {
 		if deps.Pool == nil {
 			return nil, errors.New("sql lookup: db pool is required")
 		}
-		return newSQLLookup(&poolQuerier{pool: deps.Pool}, sqlText, 0)
+		l, err := newSQLLookup(&poolQuerier{pool: deps.Pool}, sqlText, 0)
+		if err != nil {
+			return nil, err
+		}
+		return NewCachedLookup(l, spec.TTL), nil
 	})
 }

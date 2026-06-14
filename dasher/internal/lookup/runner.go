@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"time"
 )
 
 // ErrPoison is the sentinel error type returned when a lookup result is
@@ -22,28 +21,26 @@ func IsPoison(err error) bool {
 
 // EnrichRule describes one lookup step within a Runner.
 type EnrichRule struct {
-	// LookupName is the catalog key.
+	// LookupName is the catalog key (used in error messages).
 	LookupName string
-	// Lookup is the resolved Lookup instance.
+	// Lookup is the resolved Lookup instance (may be a cachedLookup wrapper).
 	Lookup Lookup
 	// Bind maps query param → source column.
 	Bind map[string]string
 	// Into is the key set in the result map (e.g. "user" → result["user"]).
 	Into string
-	// CacheTTL is the TTL for cached results (from the Spec). Zero means no caching.
-	CacheTTL time.Duration
 }
 
 // Runner orchestrates lookup enrichment for one binding.
 // Operates on plain maps only — does NOT import the dasher package (oracle B1).
+// Caching is the responsibility of each Lookup instance, not the Runner.
 type Runner struct {
 	rules []EnrichRule
-	cache *Cache
 }
 
-// NewRunner creates a Runner with the given rules and cache.
-func NewRunner(rules []EnrichRule, cache *Cache) *Runner {
-	return &Runner{rules: rules, cache: cache}
+// NewRunner creates a Runner with the given rules.
+func NewRunner(rules []EnrichRule) *Runner {
+	return &Runner{rules: rules}
 }
 
 // Run executes all rules in order against data and old, returning an enrichment
@@ -73,26 +70,12 @@ func (r *Runner) Run(ctx context.Context, data, old map[string]any) (map[string]
 			return nil, &ErrPoison{Msg: fmt.Sprintf("lookup %q: bind column not found in data or old", rule.LookupName)}
 		}
 
-		// Check cache.
-		cacheKey := MakeCacheKey(rule.LookupName, bind)
-		if rows, ok := r.cache.Get(cacheKey); ok {
-			if err := applyRows(rows, rule, result); err != nil {
-				return nil, err
-			}
-			continue
-		}
-
-		// Cache miss: call lookup.
 		rows, err := rule.Lookup.Resolve(ctx, bind)
 		if err != nil {
 			return nil, err // transient, retryable
 		}
 		if err := applyRows(rows, rule, result); err != nil {
 			return nil, err
-		}
-		// Only cache successful single-row results.
-		if len(rows) == 1 {
-			r.cache.Set(cacheKey, rows, rule.CacheTTL)
 		}
 	}
 

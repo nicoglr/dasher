@@ -61,7 +61,7 @@ func TestCacheJitterBounds(t *testing.T) {
 }
 
 func TestMakeCacheKey(t *testing.T) {
-	k1 := lookup.MakeCacheKey("my_lookup", map[string]any{"a": 1, "b": 2})
-	k2 := lookup.MakeCacheKey("my_lookup", map[string]any{"b": 2, "a": 1})
+	k1 := lookup.MakeCacheKey(map[string]any{"a": 1, "b": 2})
+	k2 := lookup.MakeCacheKey(map[string]any{"b": 2, "a": 1})
 	assert.Equal(t, k1, k2, "key must be stable regardless of map iteration order")
 }
