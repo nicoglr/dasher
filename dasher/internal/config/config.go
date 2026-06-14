@@ -76,13 +76,21 @@ var (
 	ErrInstanceNotFound   = errors.New("instance not found in config")
 	ErrNoStreams           = errors.New("instance has no streams")
 	ErrMissingStreamName  = errors.New("stream binding missing stream name")
-	ErrMissingHandlerName = errors.New("stream binding missing handler name")
 	ErrBadEscalateAfter   = errors.New("DASHER_ESCALATE_AFTER must be a positive integer")
 	ErrEmptyBinding       = errors.New("stream binding must have at least one of handler or emit")
 	ErrSelfEmit           = errors.New("emit must not point to the same stream")
+	// ErrEmitCycle is returned when emit points to another binding's stream.
+	// This is a conservative one-hop check: any emit that targets a stream
+	// already listed as a binding's source is rejected, even if that target
+	// binding is terminal (no further emit). This prevents accidental
+	// fan-out loops without requiring full graph analysis.
 	ErrEmitCycle          = errors.New("emit must not point to another binding's stream (cycle)")
 	ErrUnknownLookup      = errors.New("enrich references unknown lookup name")
 	ErrUnknownLookupType  = errors.New("lookup catalog entry has unknown type")
+	// ErrMissingDBConfig is checked at config-load time using the current
+	// process environment. If the DSN env var is set after process start
+	// (e.g. in test harnesses), validation passes but services.New will
+	// leave DB nil, causing a nil-dereference at lookup time.
 	ErrMissingDBConfig    = errors.New("enrich requires db config (services.db.dsn_env)")
 	ErrBadOnMiss          = errors.New("on_miss must be emit_unenriched or fail")
 	ErrBadBindKey         = errors.New("bind value must be a valid column identifier")
