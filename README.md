@@ -81,3 +81,73 @@ WALker produces the streams; Dasher consumes them. Both share the same stream-ke
 - One process serving multiple instances (model C)
 - Dead-letter queue
 - Metrics, TLS
+
+## Enrichment
+
+Dasher can enrich CDC events with related data (e.g. resolve a `user_role_grant`
+change to the affected user's email) **before** dispatching downstream. This
+keeps enrichment queries off the Postgres replication slot and off the WALker
+critical path.
+
+### Pipeline
+
+A binding has three orthogonal optional fields, composed in a fixed order:
+
+```
+event ─► [enrich: populate Event.Enrichment] ─► [handler: side effect] ─► [emit: XADD downstream] ─► XACK
+```
+
+| Field | Meaning | Required? |
+|---|---|---|
+| `enrich` | List of lookup rules; populates `Event.Enrichment` | Optional |
+| `handler` | Named handler for side effects | At least one of handler/emit |
+| `emit` | Downstream stream name; published after handler success | At least one of handler/emit |
+
+**Combinations:**
+- **Terminal**: `handler` only — standard pattern, unchanged from v0.
+- **Pure transform**: `enrich` + `emit`, no handler — consume, enrich, re-publish.
+- **Enriched terminal**: `enrich` + `handler` — enrich then side-effect.
+
+### Lookup catalog
+
+Each instance declares named lookups under `lookups:`. A lookup is resolved
+once at startup and shared across all bindings that reference it. In v1, only
+`type: sql` is supported.
+
+```yaml
+lookups:
+  user_email_by_role:
+    type: sql
+    ttl: 24h     # in-process LRU+TTL cache TTL
+    sql: |
+      SELECT u.email FROM users u
+      JOIN user_roles ur ON ur.user_id = u.id
+      WHERE ur.id = @role_id
+```
+
+### Bind keys
+
+A bind maps a query parameter (`@name`) to a source column. Dasher automatically
+tries `data[col]` first, then `old[col]` — the universal CDC rule for
+insert/update/delete:
+
+```yaml
+bind:
+  role_id: user_id    # @role_id ← data.user_id, falling back to old.user_id
+```
+
+### Caching
+
+Results are cached in-process with bounded LRU + TTL (±15% jitter to prevent
+synchronized expiry stampedes). The cache is shared across all bindings in an
+instance. **Use `on_miss: fail` when pointing at a replica** (stale reads can
+cause silent data loss; the default `emit_unenriched` is safe only against the
+primary).
+
+### Prerequisites
+
+- A `services.db` block with `dsn_env` pointing at the **primary** Postgres DSN.
+- For `DELETE` enrichment: `ALTER TABLE … REPLICA IDENTITY FULL` — otherwise
+  `old` will only contain the PK, not the enrichment column.
+
+See `config.example.yaml` for a complete example.
