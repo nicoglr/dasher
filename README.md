@@ -17,6 +17,7 @@ Stream keys follow the convention `<instance-id>.<stream>`, e.g. `bayer-17909.cd
 |---|---|
 | `nil` | `XACK` — done |
 | `dasher.Poison(err)` | Fatal — process exits (entry stays in PEL for inspection) |
+| Lookup miss or multi-row result | Also fatal (poison) — same PEL consequence; see task #9 for DLQ |
 | Any other error | Transient — retry with backoff; log escalates `WARN→ERROR` after N retries |
 
 Malformed envelope (unparseable stream entry) is also fatal.
@@ -79,7 +80,10 @@ WALker produces the streams; Dasher consumes them. Both share the same stream-ke
 
 - wazero dynamic handler loading
 - One process serving multiple instances (model C)
-- Dead-letter queue
+- Dead-letter queue — lookup misses and multi-row results are permanent
+  failures (poison). Today the process exits via `FailLoud` and the offending
+  entry stays in the Redis PEL until an operator manually ACKs or deletes it.
+  A DLQ would route these events to an inspectable stream instead. See task #9.
 - Metrics, TLS
 
 ## Enrichment
@@ -107,6 +111,10 @@ event ─► [enrich: populate Event.Enrichment] ─► [handler: side effect] �
 - **Terminal**: `handler` only — standard pattern, unchanged from v0.
 - **Pure transform**: `enrich` + `emit`, no handler — consume, enrich, re-publish.
 - **Enriched terminal**: `enrich` + `handler` — enrich then side-effect.
+- **handler + emit** (dual-write): both `handler` and `emit` are set — the
+  handler runs first; only on success is the event emitted downstream. The
+  stream is XACKed only after both succeed. Prefer pure transforms over
+  dual-write to avoid partial-write foot-guns.
 
 ### Lookup catalog
 
@@ -140,9 +148,20 @@ bind:
 
 Results are cached in-process with bounded LRU + TTL (±15% jitter to prevent
 synchronized expiry stampedes). The cache is shared across all bindings in an
-instance. **Use `on_miss: fail` when pointing at a replica** (stale reads can
-cause silent data loss; the default `emit_unenriched` is safe only against the
-primary).
+instance.
+
+### Type notes
+
+Enrichment column values are decoded from JSON via `json.Number`. Integer
+columns are represented as `int64` and fractional columns as `float64` after
+normalisation, but very large floats may lose precision. Do not rely on exact
+floating-point representation for enrichment columns used as identifiers.
+
+### Operational notes
+
+- **MAXLEN**: `enriched.*` streams produced by `emit` have no automatic
+  MAXLEN trimming. Set `MAXLEN` on those streams (e.g. via `XADD … MAXLEN ~
+  <N>` or a separate trim job) or accept unbounded growth.
 
 ### Prerequisites
 

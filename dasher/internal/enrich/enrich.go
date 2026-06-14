@@ -19,6 +19,9 @@ func Enrich(runner *lookup.Runner, inner dasher.Handler) dasher.Handler {
 	return dasher.HandlerFunc(func(ctx context.Context, inst dasher.InstanceContext, evt dasher.Event) error {
 		enr, err := runner.Run(ctx, evt.Data, evt.Old)
 		if err != nil {
+			// TODO(#9): no DLQ yet — poison routes to FailLoud, which exits the process
+			// and leaves the entry in the Redis PEL. A future DLQ policy would XADD to
+			// a dead-letter stream here instead.
 			if lookup.IsPoison(err) {
 				return dasher.Poison(fmt.Errorf("enrich: %w", err))
 			}

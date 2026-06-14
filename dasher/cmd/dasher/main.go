@@ -62,7 +62,7 @@ func main() {
 	policy := dasher.FailLoud{}
 
 	// Build the lookup catalog once (each Lookup is shared across bindings).
-	resolvedLookups, err := buildLookupCatalog(cfg.Instance, svc)
+	resolvedLookups, resolvedTTLs, err := buildLookupCatalog(cfg.Instance, svc)
 	if err != nil {
 		slog.Error("build lookup catalog", "err", err)
 		os.Exit(1)
@@ -74,7 +74,7 @@ func main() {
 
 	g, gctx := errgroup.WithContext(ctx)
 	for _, b := range cfg.Instance.Streams {
-		h, err := buildHandler(b, reg, producer, cache, resolvedLookups, cfg.Instance)
+		h, err := buildHandler(b, reg, producer, cache, resolvedLookups, resolvedTTLs)
 		if err != nil {
 			slog.Error("build handler", "stream", b.Stream, "err", err)
 			os.Exit(1)
@@ -100,22 +100,24 @@ func main() {
 }
 
 // buildLookupCatalog instantiates all catalog entries once, returning a map
-// of name → Lookup.
-func buildLookupCatalog(inst config.InstanceConfig, svc *services.Services) (map[string]lookup.Lookup, error) {
+// of name → Lookup and a map of name → resolved TTL duration.
+func buildLookupCatalog(inst config.InstanceConfig, svc *services.Services) (map[string]lookup.Lookup, map[string]time.Duration, error) {
 	out := make(map[string]lookup.Lookup, len(inst.Lookups))
+	ttls := make(map[string]time.Duration, len(inst.Lookups))
 	for name, raw := range inst.Lookups {
 		factory, ok := lookup.DefaultRegistry[raw.Type]
 		if !ok {
-			return nil, fmt.Errorf("lookup %q: unknown type %q", name, raw.Type)
+			return nil, nil, fmt.Errorf("lookup %q: unknown type %q", name, raw.Type)
 		}
 		var ttl time.Duration
 		if raw.TTL != "" {
 			var err error
 			ttl, err = time.ParseDuration(raw.TTL)
 			if err != nil {
-				return nil, fmt.Errorf("lookup %q: invalid ttl %q: %w", name, raw.TTL, err)
+				return nil, nil, fmt.Errorf("lookup %q: invalid ttl %q: %w", name, raw.TTL, err)
 			}
 		}
+		ttls[name] = ttl
 		spec := lookup.Spec{
 			Type: raw.Type,
 			TTL:  ttl,
@@ -124,11 +126,11 @@ func buildLookupCatalog(inst config.InstanceConfig, svc *services.Services) (map
 		deps := lookup.Deps{Pool: svc.DB}
 		l, err := factory(spec, deps)
 		if err != nil {
-			return nil, fmt.Errorf("lookup %q: %w", name, err)
+			return nil, nil, fmt.Errorf("lookup %q: %w", name, err)
 		}
 		out[name] = l
 	}
-	return out, nil
+	return out, ttls, nil
 }
 
 // buildHandler composes the handler chain for a binding in fixed order:
@@ -139,7 +141,7 @@ func buildHandler(
 	producer *produce.Producer,
 	cache *lookup.Cache,
 	resolvedLookups map[string]lookup.Lookup,
-	inst config.InstanceConfig,
+	resolvedTTLs map[string]time.Duration,
 ) (dasher.Handler, error) {
 	// Base handler: named handler or Noop for pure transforms.
 	var base dasher.Handler = dasher.Noop
@@ -166,18 +168,12 @@ func buildHandler(
 			if !ok {
 				return nil, fmt.Errorf("enrich references unknown lookup %q", rule.Lookup)
 			}
-			// Derive TTL from the catalog spec.
-			var cacheTTL time.Duration
-			if spec, ok := inst.Lookups[rule.Lookup]; ok && spec.TTL != "" {
-				cacheTTL, _ = time.ParseDuration(spec.TTL) // already validated
-			}
 			rules = append(rules, lookup.EnrichRule{
 				LookupName: rule.Lookup,
 				Lookup:     l,
 				Bind:       rule.Bind,
 				Into:       rule.Into,
-				OnMiss:     lookup.OnMiss(rule.OnMiss),
-				CacheTTL:   cacheTTL,
+				CacheTTL:   resolvedTTLs[rule.Lookup],
 			})
 		}
 		runner := lookup.NewRunner(rules, cache)

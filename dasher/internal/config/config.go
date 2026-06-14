@@ -6,6 +6,7 @@ import (
 	"os"
 	"regexp"
 	"strconv"
+	"time"
 
 	"gopkg.in/yaml.v3"
 )
@@ -28,9 +29,9 @@ type DBConfig struct {
 
 // LookupSpecRaw is a raw catalog entry (type-specific fields preserved as-is).
 type LookupSpecRaw struct {
-	Type string        `yaml:"type"`
-	TTL  string        `yaml:"ttl"`  // parsed later as time.Duration
-	SQL  string        `yaml:"sql"`  // used by type=sql
+	Type string `yaml:"type"`
+	TTL  string `yaml:"ttl"` // parsed later as time.Duration
+	SQL  string `yaml:"sql"` // used by type=sql
 }
 
 // EnrichRuleConfig is one lookup step in a binding's enrich list.
@@ -38,7 +39,6 @@ type EnrichRuleConfig struct {
 	Lookup string            `yaml:"lookup"`
 	Bind   map[string]string `yaml:"bind"`
 	Into   string            `yaml:"into"`
-	OnMiss string            `yaml:"on_miss"`
 }
 
 // StreamBinding binds a logical stream name to an optional handler, optional
@@ -64,36 +64,34 @@ type ServicesConfig struct {
 
 // InstanceConfig is one application instance's fully-expanded config block.
 type InstanceConfig struct {
-	ID       string                    `yaml:"-"`
-	Services ServicesConfig            `yaml:"services"`
-	Lookups  map[string]LookupSpecRaw  `yaml:"lookups"`
-	Streams  []StreamBinding           `yaml:"streams"`
+	ID       string                   `yaml:"-"`
+	Services ServicesConfig           `yaml:"services"`
+	Lookups  map[string]LookupSpecRaw `yaml:"lookups"`
+	Streams  []StreamBinding          `yaml:"streams"`
 }
 
 // Sentinel errors for named validation failures in Load.
 var (
-	ErrMissingInstanceID  = errors.New("DASHER_INSTANCE_ID is required")
-	ErrInstanceNotFound   = errors.New("instance not found in config")
-	ErrNoStreams           = errors.New("instance has no streams")
-	ErrMissingStreamName  = errors.New("stream binding missing stream name")
-	ErrBadEscalateAfter   = errors.New("DASHER_ESCALATE_AFTER must be a positive integer")
-	ErrEmptyBinding       = errors.New("stream binding must have at least one of handler or emit")
-	ErrSelfEmit           = errors.New("emit must not point to the same stream")
-	// ErrEmitCycle is returned when emit points to another binding's stream.
-	// This is a conservative one-hop check: any emit that targets a stream
-	// already listed as a binding's source is rejected, even if that target
-	// binding is terminal (no further emit). This prevents accidental
-	// fan-out loops without requiring full graph analysis.
-	ErrEmitCycle          = errors.New("emit must not point to another binding's stream (cycle)")
-	ErrUnknownLookup      = errors.New("enrich references unknown lookup name")
-	ErrUnknownLookupType  = errors.New("lookup catalog entry has unknown type")
+	ErrMissingInstanceID = errors.New("DASHER_INSTANCE_ID is required")
+	ErrInstanceNotFound  = errors.New("instance not found in config")
+	ErrNoStreams          = errors.New("instance has no streams")
+	ErrMissingStreamName = errors.New("stream binding missing stream name")
+	ErrBadEscalateAfter  = errors.New("DASHER_ESCALATE_AFTER must be a positive integer")
+	ErrEmptyBinding      = errors.New("stream binding must have at least one of handler or emit")
+	ErrSelfEmit          = errors.New("emit must not point to the same stream")
+	// ErrEmitCycle is returned when a DFS back-edge walk detects a genuine
+	// cycle in the emit graph (A → B → … → A). A valid two-stage enrichment
+	// chain (A → B, where B is terminal) is not a cycle and is accepted.
+	ErrEmitCycle         = errors.New("emit graph contains a cycle")
+	ErrUnknownLookup     = errors.New("enrich references unknown lookup name")
+	ErrUnknownLookupType = errors.New("lookup catalog entry has unknown type")
 	// ErrMissingDBConfig is checked at config-load time using the current
 	// process environment. If the DSN env var is set after process start
 	// (e.g. in test harnesses), validation passes but services.New will
 	// leave DB nil, causing a nil-dereference at lookup time.
-	ErrMissingDBConfig    = errors.New("enrich requires db config (services.db.dsn_env)")
-	ErrBadOnMiss          = errors.New("on_miss must be emit_unenriched or fail")
-	ErrBadBindKey         = errors.New("bind value must be a valid column identifier")
+	ErrMissingDBConfig = errors.New("enrich requires db config (services.db.dsn_env)")
+	ErrBadBindKey      = errors.New("bind value must be a valid column identifier")
+	ErrBadLookupTTL    = errors.New("lookup ttl is invalid")
 )
 
 type file struct {
@@ -176,13 +174,10 @@ func validateInstance(inst InstanceConfig) error {
 		if !allowedLookupTypes[spec.Type] {
 			return fmt.Errorf("lookup %q: %w %q", name, ErrUnknownLookupType, spec.Type)
 		}
-	}
-
-	// Collect all stream names for cycle detection.
-	streamNames := make(map[string]bool, len(inst.Streams))
-	for _, s := range inst.Streams {
-		if s.Stream != "" {
-			streamNames[s.Stream] = true
+		if spec.TTL != "" {
+			if _, err := time.ParseDuration(spec.TTL); err != nil {
+				return fmt.Errorf("lookup %q: invalid ttl %q: %w", name, spec.TTL, ErrBadLookupTTL)
+			}
 		}
 	}
 
@@ -212,22 +207,68 @@ func validateInstance(inst InstanceConfig) error {
 		if s.Emit != "" && s.Emit == s.Stream {
 			return fmt.Errorf("stream %q: %w", s.Stream, ErrSelfEmit)
 		}
-		// Emit must not point at another binding's stream (one-hop cycle).
-		if s.Emit != "" && streamNames[s.Emit] {
-			return fmt.Errorf("stream %q emit %q: %w", s.Stream, s.Emit, ErrEmitCycle)
-		}
 		// Validate enrich rules.
 		for _, rule := range s.Enrich {
 			if _, ok := inst.Lookups[rule.Lookup]; !ok {
 				return fmt.Errorf("stream %q enrich lookup %q: %w", s.Stream, rule.Lookup, ErrUnknownLookup)
 			}
-			if rule.OnMiss != "" && rule.OnMiss != "emit_unenriched" && rule.OnMiss != "fail" {
-				return fmt.Errorf("stream %q: %w %q", s.Stream, ErrBadOnMiss, rule.OnMiss)
-			}
 			for _, col := range rule.Bind {
 				if !validIdentRe.MatchString(col) {
 					return fmt.Errorf("stream %q: %w %q", s.Stream, ErrBadBindKey, col)
 				}
+			}
+		}
+	}
+
+	// Detect genuine cycles in the emit graph via DFS back-edge walk.
+	if err := detectEmitCycles(inst.Streams); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// detectEmitCycles performs a DFS back-edge walk on the emit graph.
+// A → B where B is terminal (no further emit) is valid.
+// A → B → … → A is a genuine cycle and returns ErrEmitCycle.
+func detectEmitCycles(streams []StreamBinding) error {
+	// Build adjacency: stream → emit target (only if non-empty).
+	emitEdge := make(map[string]string, len(streams))
+	for _, s := range streams {
+		if s.Emit != "" {
+			emitEdge[s.Stream] = s.Emit
+		}
+	}
+
+	const (
+		unvisited = 0
+		visiting  = 1
+		visited   = 2
+	)
+	state := make(map[string]int, len(streams))
+
+	var dfs func(node string) error
+	dfs = func(node string) error {
+		switch state[node] {
+		case visiting:
+			return fmt.Errorf("stream %q: %w", node, ErrEmitCycle)
+		case visited:
+			return nil
+		}
+		state[node] = visiting
+		if next, ok := emitEdge[node]; ok {
+			if err := dfs(next); err != nil {
+				return err
+			}
+		}
+		state[node] = visited
+		return nil
+	}
+
+	for _, s := range streams {
+		if state[s.Stream] == unvisited {
+			if err := dfs(s.Stream); err != nil {
+				return err
 			}
 		}
 	}

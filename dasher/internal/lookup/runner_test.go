@@ -14,8 +14,8 @@ import (
 
 // fakeLookup is a test-only Lookup.
 type fakeLookup struct {
-	rows []lookup.Row
-	err  error
+	rows  []lookup.Row
+	err   error
 	calls int
 }
 
@@ -24,13 +24,12 @@ func (f *fakeLookup) Resolve(_ context.Context, _ map[string]any) ([]lookup.Row,
 	return f.rows, f.err
 }
 
-func makeRule(fl *fakeLookup, onMiss lookup.OnMiss) lookup.EnrichRule {
+func makeRule(fl *fakeLookup) lookup.EnrichRule {
 	return lookup.EnrichRule{
 		LookupName: "test_lookup",
 		Lookup:     fl,
 		Bind:       map[string]string{"user_id": "id"},
 		Into:       "user",
-		OnMiss:     onMiss,
 		CacheTTL:   time.Minute,
 	}
 }
@@ -38,7 +37,7 @@ func makeRule(fl *fakeLookup, onMiss lookup.OnMiss) lookup.EnrichRule {
 func TestRunner_CacheHit(t *testing.T) {
 	fl := &fakeLookup{rows: []lookup.Row{{"email": "alice@example.com"}}}
 	cache := lookup.NewCache(10)
-	runner := lookup.NewRunner([]lookup.EnrichRule{makeRule(fl, lookup.OnMissEmitUnenriched)}, cache)
+	runner := lookup.NewRunner([]lookup.EnrichRule{makeRule(fl)}, cache)
 	ctx := context.Background()
 	data := map[string]any{"id": "alice"}
 
@@ -57,25 +56,15 @@ func TestRunner_CacheHit(t *testing.T) {
 
 func TestRunner_MissResolvePopulate(t *testing.T) {
 	fl := &fakeLookup{rows: []lookup.Row{{"email": "bob@example.com"}}}
-	runner := lookup.NewRunner([]lookup.EnrichRule{makeRule(fl, lookup.OnMissEmitUnenriched)}, lookup.NewCache(10))
+	runner := lookup.NewRunner([]lookup.EnrichRule{makeRule(fl)}, lookup.NewCache(10))
 	result, err := runner.Run(context.Background(), map[string]any{"id": "bob"}, nil)
 	require.NoError(t, err)
 	assert.Equal(t, lookup.Row{"email": "bob@example.com"}, result["user"])
 }
 
-func TestRunner_ZeroRows_EmitUnenriched(t *testing.T) {
+func TestRunner_ZeroRows_Poison(t *testing.T) {
 	fl := &fakeLookup{rows: nil}
-	runner := lookup.NewRunner([]lookup.EnrichRule{makeRule(fl, lookup.OnMissEmitUnenriched)}, lookup.NewCache(10))
-	result, err := runner.Run(context.Background(), map[string]any{"id": "x"}, nil)
-	require.NoError(t, err)
-	val, exists := result["user"]
-	assert.True(t, exists)
-	assert.Nil(t, val)
-}
-
-func TestRunner_ZeroRows_Fail(t *testing.T) {
-	fl := &fakeLookup{rows: nil}
-	runner := lookup.NewRunner([]lookup.EnrichRule{makeRule(fl, lookup.OnMissFail)}, lookup.NewCache(10))
+	runner := lookup.NewRunner([]lookup.EnrichRule{makeRule(fl)}, lookup.NewCache(10))
 	_, err := runner.Run(context.Background(), map[string]any{"id": "x"}, nil)
 	require.Error(t, err)
 	assert.True(t, lookup.IsPoison(err))
@@ -83,25 +72,25 @@ func TestRunner_ZeroRows_Fail(t *testing.T) {
 
 func TestRunner_MultiRow_Poison(t *testing.T) {
 	fl := &fakeLookup{rows: []lookup.Row{{"a": 1}, {"a": 2}}}
-	runner := lookup.NewRunner([]lookup.EnrichRule{makeRule(fl, lookup.OnMissEmitUnenriched)}, lookup.NewCache(10))
+	runner := lookup.NewRunner([]lookup.EnrichRule{makeRule(fl)}, lookup.NewCache(10))
 	_, err := runner.Run(context.Background(), map[string]any{"id": "x"}, nil)
 	require.Error(t, err)
 	assert.True(t, lookup.IsPoison(err))
 }
 
-func TestRunner_NilBind_ShortCircuitsWithoutResolve(t *testing.T) {
+func TestRunner_NilBind_Poison(t *testing.T) {
 	fl := &fakeLookup{rows: []lookup.Row{{"email": "x"}}}
-	runner := lookup.NewRunner([]lookup.EnrichRule{makeRule(fl, lookup.OnMissEmitUnenriched)}, lookup.NewCache(10))
-	// No "id" in data or old → nil bind
-	result, err := runner.Run(context.Background(), map[string]any{}, nil)
-	require.NoError(t, err)
+	runner := lookup.NewRunner([]lookup.EnrichRule{makeRule(fl)}, lookup.NewCache(10))
+	// No "id" in data or old → nil bind → poison
+	_, err := runner.Run(context.Background(), map[string]any{}, nil)
+	require.Error(t, err)
+	assert.True(t, lookup.IsPoison(err))
 	assert.Equal(t, 0, fl.calls, "Resolve must NOT be called when bind is nil")
-	assert.Nil(t, result["user"])
 }
 
 func TestRunner_TransientError_Propagates(t *testing.T) {
 	fl := &fakeLookup{err: errors.New("db timeout")}
-	runner := lookup.NewRunner([]lookup.EnrichRule{makeRule(fl, lookup.OnMissEmitUnenriched)}, lookup.NewCache(10))
+	runner := lookup.NewRunner([]lookup.EnrichRule{makeRule(fl)}, lookup.NewCache(10))
 	_, err := runner.Run(context.Background(), map[string]any{"id": "x"}, nil)
 	require.Error(t, err)
 	assert.False(t, lookup.IsPoison(err))

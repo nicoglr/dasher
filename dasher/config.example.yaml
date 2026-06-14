@@ -26,7 +26,7 @@ instances:
       internal:
         base_url: https://enrichment.internal.svc
       # db: pool for sql lookups; DSN comes from env (never hardcode secrets).
-      # Point at the PRIMARY (emit_unenriched default is safe against primary).
+      # Point at the PRIMARY.
       db:
         dsn_env: DASHER_DB_DSN    # name of env var holding the connection string
         max_conns: 4              # optional, default 4
@@ -52,7 +52,6 @@ instances:
             bind:
               role_id: user_id          # @role_id ← column user_id (data, then old)
             into: user                  # → Event.Enrichment["user"]
-            on_miss: emit_unenriched    # emit null enrichment on miss (default); use "fail" to poison
 
       # TERMINAL: reads enriched event and runs the side-effect handler.
       - stream: enriched.user_role_grant

@@ -46,7 +46,6 @@ func makeRunner(rows []lookup.Row, runErr error) *lookup.Runner {
 		Lookup:     fl,
 		Bind:       map[string]string{"user_id": "id"},
 		Into:       "user",
-		OnMiss:     lookup.OnMissEmitUnenriched,
 	}
 	return lookup.NewRunner([]lookup.EnrichRule{rule}, lookup.NewCache(10))
 }
@@ -87,14 +86,13 @@ func TestEnrich_MergesEnrichmentOntoEvent(t *testing.T) {
 }
 
 func TestEnrich_RunnerPoison_InnerNotCalled(t *testing.T) {
-	// on_miss=fail + no rows → ErrPoison from runner
+	// zero rows → ErrPoison from runner
 	fl := &fakeLookup{rows: nil, err: nil}
 	rule := lookup.EnrichRule{
 		LookupName: "test",
 		Lookup:     fl,
 		Bind:       map[string]string{"user_id": "id"},
 		Into:       "user",
-		OnMiss:     lookup.OnMissFail,
 	}
 	runner := lookup.NewRunner([]lookup.EnrichRule{rule}, lookup.NewCache(10))
 	inner := &captureHandler{}
@@ -113,7 +111,6 @@ func TestEnrich_TransientError_Returned(t *testing.T) {
 		Lookup:     fl,
 		Bind:       map[string]string{"user_id": "id"},
 		Into:       "user",
-		OnMiss:     lookup.OnMissEmitUnenriched,
 	}
 	runner := lookup.NewRunner([]lookup.EnrichRule{rule}, lookup.NewCache(10))
 	inner := &captureHandler{}

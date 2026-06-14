@@ -75,7 +75,6 @@ func TestEndToEnd_CDCEnrichEmit(t *testing.T) {
 		Lookup:     fl,
 		Bind:       map[string]string{"user_id": "id"},
 		Into:       "user",
-		OnMiss:     lookup.OnMissEmitUnenriched,
 		CacheTTL:   time.Minute,
 	}
 	runner := lookup.NewRunner([]lookup.EnrichRule{rule}, lookup.NewCache(10))

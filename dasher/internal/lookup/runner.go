@@ -8,7 +8,7 @@ import (
 )
 
 // ErrPoison is the sentinel error type returned when a lookup result is
-// permanently invalid (on_miss=fail, or >1 row). The caller (internal/enrich)
+// permanently invalid (0 rows or >1 row). The caller (internal/enrich)
 // wraps this with dasher.Poison.
 type ErrPoison struct{ Msg string }
 
@@ -20,16 +20,6 @@ func IsPoison(err error) bool {
 	return errors.As(err, &p)
 }
 
-// OnMiss controls what happens when a lookup finds no row.
-type OnMiss string
-
-const (
-	// OnMissEmitUnenriched sets Enrichment[into] = nil and continues (default).
-	OnMissEmitUnenriched OnMiss = "emit_unenriched"
-	// OnMissFail returns an ErrPoison, blocking the event.
-	OnMissFail OnMiss = "fail"
-)
-
 // EnrichRule describes one lookup step within a Runner.
 type EnrichRule struct {
 	// LookupName is the catalog key.
@@ -40,8 +30,6 @@ type EnrichRule struct {
 	Bind map[string]string
 	// Into is the key set in the result map (e.g. "user" → result["user"]).
 	Into string
-	// OnMiss controls behaviour when Resolve returns 0 rows.
-	OnMiss OnMiss
 	// CacheTTL is the TTL for cached results (from the Spec). Zero means no caching.
 	CacheTTL time.Duration
 }
@@ -59,10 +47,10 @@ func NewRunner(rules []EnrichRule, cache *Cache) *Runner {
 }
 
 // Run executes all rules in order against data and old, returning an enrichment
-// map (or an error). The returned map may contain nil values (emit_unenriched).
+// map (or an error).
 //
 // Errors:
-//   - *ErrPoison: on_miss=fail, or >1 row returned — caller wraps with dasher.Poison.
+//   - *ErrPoison: 0 rows (no match) or >1 row returned — caller wraps with dasher.Poison.
 //   - plain error: transient DB failure — retryable by the caller.
 func (r *Runner) Run(ctx context.Context, data, old map[string]any) (map[string]any, error) {
 	result := make(map[string]any)
@@ -81,11 +69,8 @@ func (r *Runner) Run(ctx context.Context, data, old map[string]any) (map[string]
 		}
 
 		if nilBind {
-			// Nil-bind short-circuit: skip query, apply on_miss.
-			if err := applyOnMiss(rule, result); err != nil {
-				return nil, err
-			}
-			continue
+			// Nil-bind: required column absent — treat as a permanent miss.
+			return nil, &ErrPoison{Msg: fmt.Sprintf("lookup %q: bind column not found in data or old", rule.LookupName)}
 		}
 
 		// Check cache.
@@ -115,26 +100,15 @@ func (r *Runner) Run(ctx context.Context, data, old map[string]any) (map[string]
 }
 
 // applyRows stores the single-row result into result[into].
-// Returns ErrPoison for 0-row on_miss=fail, ErrPoison for >1 row, nil otherwise.
+// Returns ErrPoison for 0 rows or >1 row.
 func applyRows(rows []Row, rule EnrichRule, result map[string]any) error {
 	switch len(rows) {
 	case 0:
-		return applyOnMiss(rule, result)
+		return &ErrPoison{Msg: fmt.Sprintf("lookup %q: no row found", rule.LookupName)}
 	case 1:
 		result[rule.Into] = rows[0]
 		return nil
 	default:
 		return &ErrPoison{Msg: fmt.Sprintf("lookup %q: expected at most 1 row, got %d", rule.LookupName, len(rows))}
-	}
-}
-
-// applyOnMiss applies the on_miss policy for rule.
-func applyOnMiss(rule EnrichRule, result map[string]any) error {
-	switch rule.OnMiss {
-	case OnMissFail:
-		return &ErrPoison{Msg: fmt.Sprintf("lookup %q: no row found (on_miss=fail)", rule.LookupName)}
-	default: // emit_unenriched
-		result[rule.Into] = nil
-		return nil
 	}
 }

@@ -97,9 +97,29 @@ func TestLoadEmitSelfLoop(t *testing.T) {
 }
 
 func TestLoadEmitCycle(t *testing.T) {
+	// emit-cycle-99986 has a genuine 2-hop cycle: cdc.orders→enriched.orders→cdc.orders
 	setEnv(t, "emit-cycle-99986")
 	_, err := config.Load()
 	require.ErrorIs(t, err, config.ErrEmitCycle)
+}
+
+func TestLoadPureTransformChain(t *testing.T) {
+	// valid-transform-chain-99979: cdc.events→enriched.events (terminal) — not a cycle
+	setEnv(t, "valid-transform-chain-99979")
+	_, err := config.Load()
+	require.NoError(t, err)
+}
+
+func TestLoadExampleConfig(t *testing.T) {
+	// Verify config.example.yaml loads without error for the enrichment-example instance.
+	t.Setenv("DASHER_DB_DSN", "postgres://localhost/test")
+	t.Setenv("DASHER_INSTANCE_ID", "enrichment-example")
+	t.Setenv("DASHER_CONFIG", "../../config.example.yaml")
+	t.Setenv("DASHER_REDIS_ADDR", "localhost:6379")
+	t.Setenv("DASHER_AUTH_TOKEN", "t")
+	t.Setenv("DASHER_ESCALATE_AFTER", "")
+	_, err := config.Load()
+	require.NoError(t, err)
 }
 
 func TestLoadUnknownLookupRef(t *testing.T) {
@@ -130,9 +150,8 @@ func TestLoadBadBindKey(t *testing.T) {
 	require.ErrorIs(t, err, config.ErrBadBindKey)
 }
 
-func TestLoadBadOnMiss(t *testing.T) {
-	t.Setenv("DASHER_TEST_DSN", "postgres://localhost/test")
-	setEnv(t, "bad-on-miss-99981")
+func TestLoadBadLookupTTL(t *testing.T) {
+	setEnv(t, "bad-lookup-ttl-99980")
 	_, err := config.Load()
-	require.ErrorIs(t, err, config.ErrBadOnMiss)
+	require.ErrorIs(t, err, config.ErrBadLookupTTL)
 }

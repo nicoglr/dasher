@@ -51,7 +51,7 @@ func MakeCacheKey(lookupName string, bind map[string]any) string {
 	sort.Strings(keys)
 	key := lookupName
 	for _, k := range keys {
-		key += fmt.Sprintf("|%s=%v", k, bind[k])
+		key += fmt.Sprintf("|%s=%T:%v", k, bind[k], bind[k])
 	}
 	return key
 }

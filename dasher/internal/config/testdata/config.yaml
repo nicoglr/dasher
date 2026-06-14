@@ -54,7 +54,6 @@ instances:
             bind:
               user_id: user_id
             into: user
-            on_miss: emit_unenriched
   enriched-terminal-99989:
     services:
       internal:
@@ -88,6 +87,7 @@ instances:
     streams:
       - stream: cdc.orders
         emit: cdc.orders
+  # Genuine 2-hop cycle: cdc.orders → enriched.orders → cdc.orders
   emit-cycle-99986:
     services:
       internal:
@@ -96,7 +96,17 @@ instances:
       - stream: cdc.orders
         emit: enriched.orders
       - stream: enriched.orders
-        handler: order-sync@v1
+        emit: cdc.orders
+  # Valid two-stage transform: cdc.events → enriched.events (terminal)
+  valid-transform-chain-99979:
+    services:
+      internal:
+        base_url: https://x.internal.svc
+    streams:
+      - stream: cdc.events
+        emit: enriched.events
+      - stream: enriched.events
+        handler: some-handler
   unknown-lookup-ref-99985:
     services:
       internal:
@@ -160,22 +170,15 @@ instances:
             bind:
               user_id: "bad-column-name"
             into: user
-  bad-on-miss-99981:
+  bad-lookup-ttl-99980:
     services:
       internal:
         base_url: https://x.internal.svc
-      db:
-        dsn_env: DASHER_TEST_DSN
     lookups:
       user_email:
         type: sql
+        ttl: "24x"
         sql: "SELECT email FROM users WHERE id = @user_id"
     streams:
       - stream: cdc.orders
-        emit: enriched.orders
-        enrich:
-          - lookup: user_email
-            bind:
-              user_id: user_id
-            into: user
-            on_miss: invalid_value
+        handler: order-sync@v1
