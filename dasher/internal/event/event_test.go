@@ -58,3 +58,21 @@ func TestParseBadDataErrors(t *testing.T) {
 	_, err := event.Parse("4-0", v)
 	require.ErrorIs(t, err, event.ErrMalformedJSON)
 }
+
+func TestParseWithEnrichment(t *testing.T) {
+	v := base()
+	v["enrichment"] = `{"user":{"email":"alice@example.com"}}`
+	evt, err := event.Parse("5-0", v)
+	require.NoError(t, err)
+	require.NotNil(t, evt.Enrichment)
+	user, ok := evt.Enrichment["user"].(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, "alice@example.com", user["email"])
+}
+
+func TestParseNoEnrichmentIsNil(t *testing.T) {
+	v := base()
+	evt, err := event.Parse("6-0", v)
+	require.NoError(t, err)
+	assert.Nil(t, evt.Enrichment)
+}

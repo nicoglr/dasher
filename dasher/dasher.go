@@ -23,6 +23,7 @@ type Event struct {
 	StreamedAt time.Time
 	Data       map[string]any // full new row (INSERT/UPDATE) or PK only (DELETE)
 	Old        map[string]any // PK of previous row (UPDATE/DELETE)
+	Enrichment map[string]any // derived lookup results; nil when none
 }
 
 // InstanceContext is handed to every handler invocation.
@@ -43,6 +44,16 @@ type HandlerFunc func(context.Context, InstanceContext, Event) error
 // Handle implements Handler.
 func (f HandlerFunc) Handle(ctx context.Context, inst InstanceContext, evt Event) error {
 	return f(ctx, inst, evt)
+}
+
+// Noop is a Handler that does nothing and returns nil. Used as the inner
+// handler for pure-transform bindings (enrich+emit, no side effect).
+var Noop Handler = HandlerFunc(func(context.Context, InstanceContext, Event) error { return nil })
+
+// Producer publishes an Event to a logical stream (instance prefix applied by
+// the implementation). Used by the EmitAfter middleware to emit downstream.
+type Producer interface {
+	Emit(ctx context.Context, stream string, evt Event) error
 }
 
 // poisonError marks an error as poison: the event will never succeed (bad
