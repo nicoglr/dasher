@@ -2,6 +2,7 @@ package lookup
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -46,6 +47,22 @@ type Registry map[string]Factory
 // Register adds a factory for typeName.
 func (r Registry) Register(typeName string, f Factory) {
 	r[typeName] = f
+}
+
+// New returns a new, empty Registry. Prefer this over Registry{} in tests to
+// avoid mutating DefaultRegistry.
+func New() Registry {
+	return Registry{}
+}
+
+// Build constructs a Lookup from the given Spec using the registered factory.
+// Returns an error if the type is unknown.
+func (r Registry) Build(spec Spec, deps Deps) (Lookup, error) {
+	f, ok := r[spec.Type]
+	if !ok {
+		return nil, fmt.Errorf("lookup: unknown type %q", spec.Type)
+	}
+	return f(spec, deps)
 }
 
 // DefaultRegistry is the global type registry populated by init() functions
