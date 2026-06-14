@@ -1,4 +1,4 @@
-.PHONY: build test lint smoke
+.PHONY: build test lint smoke test-integration
 
 build:
 	go build ./...
@@ -11,3 +11,6 @@ lint:
 
 smoke: build
 	./smoke.sh
+
+test-integration:
+	./scripts/run-integration-tests.sh
