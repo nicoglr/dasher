@@ -84,8 +84,9 @@ func main() {
 		g.Go(func() error { return c.Run(gctx) })
 	}
 
-	if err := g.Wait(); err != nil {
-		slog.Error("dasher exited", "err", err)
+	werr := g.Wait()
+	if werr != nil {
+		slog.Error("dasher exited", "err", werr)
 	}
 
 	// Shutdown ordering: close the DB pool strictly AFTER all consumers stop.
@@ -93,7 +94,7 @@ func main() {
 	// consumer can attempt a lookup after the pool is closed.
 	svc.Close()
 
-	if err != nil {
+	if werr != nil {
 		os.Exit(1)
 	}
 }
