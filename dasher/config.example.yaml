@@ -17,3 +17,51 @@ instances:
         handler: order-sync@v2
       - stream: cdc.products
         handler: product-sync
+
+  # Example: enrichment instance
+  # Enrichment lets Dasher resolve lookup data (e.g. a user's email by role ID)
+  # before dispatching downstream, keeping queries off the WALker replication path.
+  enrichment-example:
+    services:
+      internal:
+        base_url: https://enrichment.internal.svc
+      # db: pool for sql lookups; DSN comes from env (never hardcode secrets).
+      # Point at the PRIMARY (emit_unenriched default is safe against primary).
+      db:
+        dsn_env: DASHER_DB_DSN    # name of env var holding the connection string
+        max_conns: 4              # optional, default 4
+
+    # Named lookup catalog. Each entry is resolved once at startup.
+    lookups:
+      user_email_by_role:
+        type: sql                 # only supported type in v1
+        ttl: 24h                  # in-process LRU+TTL cache TTL; required in practice
+        sql: |
+          SELECT u.email
+          FROM users u
+          JOIN user_roles ur ON ur.user_id = u.id
+          WHERE ur.id = @role_id  # @param_name must match bind key
+
+    streams:
+      # PURE TRANSFORM: enrich + emit, no handler.
+      # Reads cdc.user_role_grant, enriches with user email, emits enriched event.
+      - stream: cdc.user_role_grant
+        emit: enriched.user_role_grant
+        enrich:
+          - lookup: user_email_by_role
+            bind:
+              role_id: user_id          # @role_id ← column user_id (data, then old)
+            into: user                  # → Event.Enrichment["user"]
+            on_miss: emit_unenriched    # emit null enrichment on miss (default); use "fail" to poison
+
+      # TERMINAL: reads enriched event and runs the side-effect handler.
+      - stream: enriched.user_role_grant
+        handler: permission-sync
+
+      # ENRICHED TERMINAL: enrich + handler, no emit.
+      # - stream: cdc.orders
+      #   handler: order-sync@v1
+      #   enrich:
+      #     - lookup: customer_by_id
+      #       bind: { customer_id: customer_id }
+      #       into: customer
