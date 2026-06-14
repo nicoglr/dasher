@@ -127,7 +127,7 @@ func waitFor(t *testing.T, cond func() bool) {
 
 // waitForStream is like waitFor but with a 5s deadline (used for integration
 // tests that involve real I/O and real-time sleeps).
-func waitForStream(t *testing.T, _ *redis.Client, _ string, cond func() bool) {
+func waitForStream(t *testing.T, cond func() bool) {
 	t.Helper()
 	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
@@ -153,7 +153,7 @@ func validVals() map[string]any {
 
 // isRedisBusyGroup reports whether err is a BUSYGROUP error.
 func isRedisBusyGroup(err error) bool {
-	return err != nil && len(err.Error()) >= 9 && err.Error()[:9] == "BUSYGROUP"
+	return err != nil && strings.HasPrefix(err.Error(), "BUSYGROUP")
 }
 
 // deliverToConsumer XREADGROUPs one entry to the named consumer without acking,
@@ -334,7 +334,7 @@ func TestBackgroundReclaimLoop(t *testing.T) {
 	go func() { _ = c.Run(runCtx) }()
 
 	waitFor(t, func() bool { return atomic.LoadInt32(&h.calls) >= 1 })
-	waitForStream(t, rdb, s, func() bool {
+	waitForStream(t, func() bool {
 		p, _ := rdb.XPending(ctx, s, group).Result()
 		return p.Count == 0
 	})

@@ -2,6 +2,7 @@ package config_test
 
 import (
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -161,4 +162,66 @@ func TestLoadMissingURLEnv(t *testing.T) {
 	setEnv(t, "missing-url-env-99978")
 	_, err := config.Load()
 	require.ErrorIs(t, err, config.ErrMissingURLEnv)
+}
+
+// --- Consumer-group lifecycle env var tests ---
+
+func TestLoadLifecycleDefaults(t *testing.T) {
+	setEnv(t, "bayer-17909")
+	cfg, err := config.Load()
+	require.NoError(t, err)
+	assert.Equal(t, 30*time.Second, cfg.ReclaimMinIdle)
+	assert.Equal(t, 5*time.Second, cfg.ReclaimInterval)
+	assert.Equal(t, 5*time.Minute, cfg.ConsumerGCInterval)
+	assert.Equal(t, 10*time.Minute, cfg.ConsumerGCTimeout)
+}
+
+func TestLoadLifecycleEnvVars(t *testing.T) {
+	setEnv(t, "bayer-17909")
+	t.Setenv("DASHER_RECLAIM_MIN_IDLE", "45s")
+	t.Setenv("DASHER_RECLAIM_INTERVAL", "10s")
+	t.Setenv("DASHER_CONSUMER_GC_INTERVAL", "2m")
+	t.Setenv("DASHER_CONSUMER_GC_TIMEOUT", "15m")
+	cfg, err := config.Load()
+	require.NoError(t, err)
+	assert.Equal(t, 45*time.Second, cfg.ReclaimMinIdle)
+	assert.Equal(t, 10*time.Second, cfg.ReclaimInterval)
+	assert.Equal(t, 2*time.Minute, cfg.ConsumerGCInterval)
+	assert.Equal(t, 15*time.Minute, cfg.ConsumerGCTimeout)
+}
+
+func TestLoadBadReclaimMinIdle(t *testing.T) {
+	setEnv(t, "bayer-17909")
+	t.Setenv("DASHER_RECLAIM_MIN_IDLE", "not-a-duration")
+	_, err := config.Load()
+	require.ErrorIs(t, err, config.ErrBadReclaimMinIdle)
+}
+
+func TestLoadBadReclaimInterval(t *testing.T) {
+	setEnv(t, "bayer-17909")
+	t.Setenv("DASHER_RECLAIM_INTERVAL", "-1s")
+	_, err := config.Load()
+	require.ErrorIs(t, err, config.ErrBadReclaimInterval)
+}
+
+func TestLoadBadConsumerGCInterval(t *testing.T) {
+	setEnv(t, "bayer-17909")
+	t.Setenv("DASHER_CONSUMER_GC_INTERVAL", "0s")
+	_, err := config.Load()
+	require.ErrorIs(t, err, config.ErrBadConsumerGCInterval)
+}
+
+func TestLoadBadConsumerGCTimeout(t *testing.T) {
+	setEnv(t, "bayer-17909")
+	t.Setenv("DASHER_CONSUMER_GC_TIMEOUT", "banana")
+	_, err := config.Load()
+	require.ErrorIs(t, err, config.ErrBadConsumerGCTimeout)
+}
+
+func TestLoadConsumerGCTimeoutTooSmall(t *testing.T) {
+	setEnv(t, "bayer-17909")
+	// GCTimeout (20s) <= ReclaimMinIdle (30s default) — must be rejected.
+	t.Setenv("DASHER_CONSUMER_GC_TIMEOUT", "20s")
+	_, err := config.Load()
+	require.ErrorIs(t, err, config.ErrConsumerGCTimeoutTooSmall)
 }

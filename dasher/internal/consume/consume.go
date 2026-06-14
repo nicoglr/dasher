@@ -328,6 +328,13 @@ func (c *Consumer) gcConsumers(ctx context.Context) error {
 		return fmt.Errorf("XINFO CONSUMERS %s: %w", c.stream, err)
 	}
 	for _, xic := range consumers {
+		// Never GC ourselves — XREADGROUP on a quiet stream does not reset our
+		// idle clock in Redis 7, so we could appear idle and self-delete.
+		// Redis would auto-recreate us on the next XREADGROUP call, but the
+		// spurious delete produces an unwanted log line.
+		if xic.Name == c.name {
+			continue
+		}
 		if xic.Idle >= c.consumerGCTimeout && xic.Pending == 0 {
 			if err := c.rdb.XGroupDelConsumer(ctx, c.stream, c.group, xic.Name).Err(); err != nil {
 				slog.Warn("XGROUP DELCONSUMER failed",
