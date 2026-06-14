@@ -79,7 +79,12 @@ func main() {
 			os.Exit(1)
 		}
 		key := cfg.InstanceID + "." + b.Stream
-		c := consume.New(rdb, key, cfg.Group, cfg.Consumer, h, inst, policy, cfg.EscalateAfter)
+		c := consume.New(rdb, key, cfg.Group, cfg.Consumer, h, inst, policy, cfg.EscalateAfter,
+			consume.WithReclaimMinIdle(cfg.ReclaimMinIdle),
+			consume.WithReclaimInterval(cfg.ReclaimInterval),
+			consume.WithConsumerGCInterval(cfg.ConsumerGCInterval),
+			consume.WithConsumerGCTimeout(cfg.ConsumerGCTimeout),
+		)
 		g.Go(func() error { return c.Run(gctx) })
 	}
 

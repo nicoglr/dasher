@@ -98,6 +98,13 @@ var (
 	ErrMissingURLEnv = errors.New("services.internal.url_env is set but the env var is empty")
 	ErrBadBindKey      = errors.New("bind value must be a valid column identifier")
 	ErrBadLookupTTL    = errors.New("lookup ttl is invalid")
+
+	// Consumer-group lifecycle tuning.
+	ErrBadReclaimMinIdle         = errors.New("DASHER_RECLAIM_MIN_IDLE must be a positive duration")
+	ErrBadReclaimInterval        = errors.New("DASHER_RECLAIM_INTERVAL must be a positive duration")
+	ErrBadConsumerGCInterval     = errors.New("DASHER_CONSUMER_GC_INTERVAL must be a positive duration")
+	ErrBadConsumerGCTimeout      = errors.New("DASHER_CONSUMER_GC_TIMEOUT must be a positive duration")
+	ErrConsumerGCTimeoutTooSmall = errors.New("DASHER_CONSUMER_GC_TIMEOUT must be greater than DASHER_RECLAIM_MIN_IDLE")
 )
 
 type file struct {
@@ -112,6 +119,12 @@ type Config struct {
 	Consumer      string // consumer name = process identity (hostname)
 	EscalateAfter int    // consecutive transient retries before WARN→ERROR escalation
 	Instance      InstanceConfig
+
+	// Consumer-group lifecycle tuning (see DASHER_* env vars).
+	ReclaimMinIdle     time.Duration // min idle before peer entries are reclaimed
+	ReclaimInterval    time.Duration // how often the background peer-reclaim ticker fires
+	ConsumerGCInterval time.Duration // how often the dead-consumer GC ticker fires
+	ConsumerGCTimeout  time.Duration // idle threshold for dead-consumer removal
 }
 
 // Load reads env vars + the YAML config file, selects this process's instance
@@ -157,13 +170,39 @@ func Load() (Config, error) {
 		consumer = "dasher"
 	}
 
+	reclaimMinIdle, err := parseDurationEnv("DASHER_RECLAIM_MIN_IDLE", 30*time.Second, ErrBadReclaimMinIdle)
+	if err != nil {
+		return Config{}, err
+	}
+	reclaimInterval, err := parseDurationEnv("DASHER_RECLAIM_INTERVAL", 5*time.Second, ErrBadReclaimInterval)
+	if err != nil {
+		return Config{}, err
+	}
+	consumerGCInterval, err := parseDurationEnv("DASHER_CONSUMER_GC_INTERVAL", 5*time.Minute, ErrBadConsumerGCInterval)
+	if err != nil {
+		return Config{}, err
+	}
+	consumerGCTimeout, err := parseDurationEnv("DASHER_CONSUMER_GC_TIMEOUT", 10*time.Minute, ErrBadConsumerGCTimeout)
+	if err != nil {
+		return Config{}, err
+	}
+	if consumerGCTimeout <= reclaimMinIdle {
+		return Config{}, fmt.Errorf(
+			"DASHER_CONSUMER_GC_TIMEOUT (%s) must be > DASHER_RECLAIM_MIN_IDLE (%s): %w",
+			consumerGCTimeout, reclaimMinIdle, ErrConsumerGCTimeoutTooSmall)
+	}
+
 	return Config{
-		InstanceID:    instanceID,
-		RedisAddr:     getenv("DASHER_REDIS_ADDR", "localhost:6379"),
-		Group:         "dasher",
-		Consumer:      consumer,
-		EscalateAfter: escalate,
-		Instance:      inst,
+		InstanceID:         instanceID,
+		RedisAddr:          getenv("DASHER_REDIS_ADDR", "localhost:6379"),
+		Group:              "dasher",
+		Consumer:           consumer,
+		EscalateAfter:      escalate,
+		Instance:           inst,
+		ReclaimMinIdle:     reclaimMinIdle,
+		ReclaimInterval:    reclaimInterval,
+		ConsumerGCInterval: consumerGCInterval,
+		ConsumerGCTimeout:  consumerGCTimeout,
 	}, nil
 }
 
@@ -289,4 +328,18 @@ func getenv(key, def string) string {
 		return v
 	}
 	return def
+}
+
+// parseDurationEnv reads an env var as a positive time.Duration, returning
+// def if unset. Returns a wrapped sentinel error on bad/non-positive values.
+func parseDurationEnv(key string, def time.Duration, sentinel error) (time.Duration, error) {
+	v := os.Getenv(key)
+	if v == "" {
+		return def, nil
+	}
+	d, err := time.ParseDuration(v)
+	if err != nil || d <= 0 {
+		return 0, fmt.Errorf("%s %q: %w", key, v, sentinel)
+	}
+	return d, nil
 }
