@@ -34,17 +34,22 @@ func main() {
 	rdb := redis.NewClient(&redis.Options{Addr: cfg.RedisAddr})
 	defer rdb.Close()
 
-	svc := services.New(cfg.Instance, cfg.AuthToken)
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	svc, err := services.New(ctx, cfg.Instance, cfg.AuthToken)
+	if err != nil {
+		slog.Error("init services", "err", err)
+		os.Exit(1)
+	}
+	defer svc.Close()
 	inst := dasher.InstanceContext{
 		ID:       cfg.Instance.ID,
 		Config:   cfg.Instance,
-		Services: svc,
+		Services: *svc,
 	}
 	reg := registry.Default()
 	policy := dasher.FailLoud{}
-
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
 
 	g, gctx := errgroup.WithContext(ctx)
 	for _, b := range cfg.Instance.Streams {
