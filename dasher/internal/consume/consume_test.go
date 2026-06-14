@@ -474,3 +474,141 @@ func TestPanicRecovery(t *testing.T) {
 		t.Fatalf("error should mention 'panic in handler', got: %v", err)
 	}
 }
+
+// TestHeartbeatFiresDuringSlowProcessing verifies that the heartbeat goroutine
+// calls claimFn while a handler is blocked and idles once the entry is done.
+func TestHeartbeatFiresDuringSlowProcessing(t *testing.T) {
+	rdb, _ := newRDB(t)
+	setupGroup(t, rdb)
+	addEntry(t, rdb, false)
+
+	const hbInterval = 5 * time.Millisecond
+
+	blockCh := make(chan struct{})
+	handling := make(chan struct{})
+	var once sync.Once
+	blockHandler := dasher.HandlerFunc(func(_ context.Context, _ dasher.InstanceContext, _ dasher.Event) error {
+		once.Do(func() { close(handling) })
+		<-blockCh
+		return nil
+	})
+
+	var claimCount int32
+	c := consume.New(rdb, stream, group, name, blockHandler, dasher.InstanceContext{}, dasher.FailLoud{}, 10,
+		consume.WithHeartbeatInterval(hbInterval),
+		consume.WithBlockDuration(20*time.Millisecond),
+	)
+	consume.SetClaimFn(c, func(_ context.Context, _ string) error {
+		atomic.AddInt32(&claimCount, 1)
+		return nil
+	})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() { _ = c.Run(ctx) }()
+
+	// Wait until handler is entered (in-flight ID published by process).
+	select {
+	case <-handling:
+	case <-time.After(2 * time.Second):
+		t.Fatal("handler not entered within deadline")
+	}
+
+	// Heartbeat should fire at least twice while the handler is blocked.
+	waitFor(t, func() bool { return atomic.LoadInt32(&claimCount) >= 2 })
+
+	// Unblock; wait for PEL to drain (entry ACKed, in-flight cleared).
+	close(blockCh)
+	waitFor(t, func() bool { return pendingCount(t, rdb) == 0 })
+
+	// After in-flight is nil, heartbeat should idle.
+	// Allow ≤1 extra tick for the handler-return → nil-store race.
+	countAfterDone := atomic.LoadInt32(&claimCount)
+	time.Sleep(5 * hbInterval)
+	finalCount := atomic.LoadInt32(&claimCount)
+	if finalCount > countAfterDone+1 {
+		t.Fatalf("heartbeat should idle after handler done: countAfterDone=%d final=%d",
+			countAfterDone, finalCount)
+	}
+}
+
+// TestHeartbeatPreventsSteal verifies the steal-prevention mechanism end-to-end:
+// (1) negative control — an idle entry IS stolen; (2) positive control — a
+// heartbeat claim resets the idle timer and blocks the steal.
+// Requires real Redis (XPendingExt idle filter not supported by miniredis).
+func TestHeartbeatPreventsSteal(t *testing.T) {
+	rdb := newRealRDB(t)
+	ctx := context.Background()
+
+	s := stream + "-heartbeat-steal"
+	t.Cleanup(func() { rdb.Del(ctx, s) })
+
+	const minIdle = 150 * time.Millisecond
+	if err := rdb.XGroupCreateMkStream(ctx, s, group, "$").Err(); err != nil && !isRedisBusyGroup(err) {
+		t.Fatalf("XGroupCreate: %v", err)
+	}
+
+	nop := dasher.HandlerFunc(func(_ context.Context, _ dasher.InstanceContext, _ dasher.Event) error {
+		return nil
+	})
+	// pod1: used for its claimFn (real XClaimJustID via ExposeClaimFn).
+	pod1 := consume.New(rdb, s, group, "pod-1", nop, dasher.InstanceContext{}, dasher.FailLoud{}, 10,
+		consume.WithReclaimMinIdle(minIdle),
+	)
+	// pod2: drives peerReclaim to simulate cross-pod theft attempts.
+	pod2 := consume.New(rdb, s, group, "pod-2", nop, dasher.InstanceContext{}, dasher.FailLoud{}, 10,
+		consume.WithReclaimMinIdle(minIdle),
+	)
+
+	pendingFor := func(consumer string) int64 {
+		t.Helper()
+		xps, err := rdb.XPendingExt(ctx, &redis.XPendingExtArgs{
+			Stream: s, Group: group, Start: "-", End: "+", Count: 100, Consumer: consumer,
+		}).Result()
+		if err != nil {
+			t.Fatalf("XPendingExt(%s): %v", consumer, err)
+		}
+		return int64(len(xps))
+	}
+	deliverTo := func(consumer string) string {
+		t.Helper()
+		res, err := rdb.XReadGroup(ctx, &redis.XReadGroupArgs{
+			Group: group, Consumer: consumer,
+			Streams: []string{s, ">"}, Count: 1, Block: -1,
+		}).Result()
+		if err != nil || len(res) == 0 || len(res[0].Messages) == 0 {
+			t.Fatalf("XReadGroup(%s): %v", consumer, err)
+		}
+		return res[0].Messages[0].ID
+	}
+
+	// ── Negative control: no heartbeat, idle > minIdle → pod-2 steals ──────────
+	rdb.XAdd(ctx, &redis.XAddArgs{Stream: s, Values: validVals()})
+	deliverTo("pod-1")
+	time.Sleep(minIdle + 30*time.Millisecond) // entry is now idle > minIdle
+
+	if err := consume.ExposePeerReclaim(pod2, ctx); err != nil {
+		t.Fatalf("negative-ctrl peerReclaim: %v", err)
+	}
+	if got := pendingFor("pod-1"); got != 0 {
+		t.Fatalf("negative-ctrl: expected pod-1 PEL empty after steal, got %d", got)
+	}
+
+	// ── Positive control: heartbeat resets idle → pod-2 cannot steal ────────────
+	rdb.XAdd(ctx, &redis.XAddArgs{Stream: s, Values: validVals()})
+	id := deliverTo("pod-1")
+	time.Sleep(minIdle + 30*time.Millisecond) // entry is idle > minIdle (would be stolen)
+
+	// Heartbeat: reset idle timer via pod1's real XClaimJustID claimFn.
+	if err := consume.ExposeClaimFn(pod1, ctx, id); err != nil {
+		t.Fatalf("heartbeat claimFn: %v", err)
+	}
+
+	// peerReclaim runs immediately — idle ≈ 0 < minIdle → no steal.
+	if err := consume.ExposePeerReclaim(pod2, ctx); err != nil {
+		t.Fatalf("positive-ctrl peerReclaim: %v", err)
+	}
+	if got := pendingFor("pod-1"); got != 1 {
+		t.Fatalf("positive-ctrl: pod-1 should retain entry after heartbeat, got %d", got)
+	}
+}

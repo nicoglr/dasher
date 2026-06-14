@@ -225,3 +225,60 @@ func TestLoadConsumerGCTimeoutTooSmall(t *testing.T) {
 	_, err := config.Load()
 	require.ErrorIs(t, err, config.ErrConsumerGCTimeoutTooSmall)
 }
+
+// --- Heartbeat interval tests ---
+
+func TestHeartbeatIntervalDefault(t *testing.T) {
+	setEnv(t, "bayer-17909")
+	// Default: HeartbeatInterval = ReclaimMinIdle/2 = 30s/2 = 15s.
+	cfg, err := config.Load()
+	require.NoError(t, err)
+	assert.Equal(t, 15*time.Second, cfg.HeartbeatInterval)
+}
+
+func TestHeartbeatIntervalDefaultFollowsReclaimMinIdle(t *testing.T) {
+	setEnv(t, "bayer-17909")
+	// Custom ReclaimMinIdle: default HeartbeatInterval should track it.
+	t.Setenv("DASHER_RECLAIM_MIN_IDLE", "60s")
+	cfg, err := config.Load()
+	require.NoError(t, err)
+	assert.Equal(t, 30*time.Second, cfg.HeartbeatInterval)
+}
+
+func TestHeartbeatIntervalExplicit(t *testing.T) {
+	setEnv(t, "bayer-17909")
+	t.Setenv("DASHER_HEARTBEAT_INTERVAL", "10s")
+	cfg, err := config.Load()
+	require.NoError(t, err)
+	assert.Equal(t, 10*time.Second, cfg.HeartbeatInterval)
+}
+
+func TestHeartbeatIntervalBadValue(t *testing.T) {
+	setEnv(t, "bayer-17909")
+	t.Setenv("DASHER_HEARTBEAT_INTERVAL", "not-a-duration")
+	_, err := config.Load()
+	require.ErrorIs(t, err, config.ErrBadHeartbeatInterval)
+}
+
+func TestHeartbeatIntervalZero(t *testing.T) {
+	setEnv(t, "bayer-17909")
+	t.Setenv("DASHER_HEARTBEAT_INTERVAL", "0s")
+	_, err := config.Load()
+	require.ErrorIs(t, err, config.ErrBadHeartbeatInterval)
+}
+
+func TestHeartbeatIntervalNegative(t *testing.T) {
+	setEnv(t, "bayer-17909")
+	t.Setenv("DASHER_HEARTBEAT_INTERVAL", "-5s")
+	_, err := config.Load()
+	require.ErrorIs(t, err, config.ErrBadHeartbeatInterval)
+}
+
+func TestHeartbeatIntervalTooLarge(t *testing.T) {
+	setEnv(t, "bayer-17909")
+	// HeartbeatInterval (20s) > ReclaimMinIdle/2 (15s) — must be rejected.
+	t.Setenv("DASHER_HEARTBEAT_INTERVAL", "20s")
+	_, err := config.Load()
+	require.ErrorIs(t, err, config.ErrHeartbeatIntervalTooLarge)
+}
+

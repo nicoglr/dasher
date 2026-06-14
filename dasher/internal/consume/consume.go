@@ -12,6 +12,7 @@ import (
 	"log/slog"
 	"runtime/debug"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/redis/go-redis/v9"
@@ -59,6 +60,20 @@ type Consumer struct {
 	// ackFn is the function used to XACK a message. Defaults to rdb.XAck and
 	// may be overridden in tests to inject transient failures.
 	ackFn func(ctx context.Context, stream, group, id string) error
+
+	// heartbeatInterval is how often the background heartbeat goroutine issues
+	// XClaimJustID on the in-flight entry. Defaults to reclaimMinIdle/2.
+	heartbeatInterval time.Duration
+
+	// inFlight holds a pointer to the ID of the entry currently being processed,
+	// or nil when the consumer is idle. Atomically updated by process();
+	// read by heartbeatLoop().
+	inFlight atomic.Pointer[string]
+
+	// claimFn issues an XClaimJustID for the given entry ID to reset its idle
+	// timer without fetching the payload or bumping the delivery counter.
+	// Defaults to XClaimJustID(self, MinIdle=0); overridable in tests.
+	claimFn func(ctx context.Context, id string) error
 }
 
 // Option is a functional option for Consumer.
@@ -94,6 +109,14 @@ func WithConsumerGCTimeout(d time.Duration) Option {
 	return func(c *Consumer) { c.consumerGCTimeout = d }
 }
 
+// WithHeartbeatInterval sets how often the background heartbeat goroutine
+// resets the in-flight entry's idle timer via XClaimJustID (default
+// reclaimMinIdle/2). Setting this too high risks cross-pod theft; the
+// config layer enforces HeartbeatInterval <= ReclaimMinIdle/2.
+func WithHeartbeatInterval(d time.Duration) Option {
+	return func(c *Consumer) { c.heartbeatInterval = d }
+}
+
 // New builds a Consumer.
 func New(rdb *redis.Client, stream, group, name string, h dasher.Handler,
 	inst dasher.InstanceContext, policy dasher.StreamErrorPolicy, escalateAfter int,
@@ -112,6 +135,30 @@ func New(rdb *redis.Client, stream, group, name string, h dasher.Handler,
 	}
 	for _, o := range opts {
 		o(c)
+	}
+	// Derive heartbeatInterval default after opts (depends on reclaimMinIdle,
+	// which may have been overridden by an option).
+	if c.heartbeatInterval <= 0 {
+		c.heartbeatInterval = c.reclaimMinIdle / 2
+	}
+	if c.claimFn == nil {
+		c.claimFn = func(ctx context.Context, id string) error {
+			ids, err := c.rdb.XClaimJustID(ctx, &redis.XClaimArgs{
+				Stream:   c.stream,
+				Group:    c.group,
+				Consumer: c.name,
+				MinIdle:  0, // MinIdle=0 is safe: we already own this entry
+				Messages: []string{id},
+			}).Result()
+			if err != nil {
+				return err
+			}
+			if len(ids) == 0 {
+				slog.Warn("heartbeat: in-flight entry no longer owned (peer stole it)",
+					"stream", c.stream, "id", id)
+			}
+			return nil
+		}
 	}
 	return c
 }
@@ -134,6 +181,9 @@ func (c *Consumer) Run(ctx context.Context) error {
 	// selfReclaim at the top of the main loop).
 	go c.reclaimLoop(ctx)
 	go c.consumerGCLoop(ctx)
+	// Background: periodically reset the in-flight entry's idle timer so peers
+	// do not steal it during slow processing.
+	go c.heartbeatLoop(ctx)
 
 	for {
 		if ctx.Err() != nil {
@@ -348,6 +398,28 @@ func (c *Consumer) gcConsumers(ctx context.Context) error {
 	return nil
 }
 
+// heartbeatLoop periodically re-claims the current in-flight entry to ourselves,
+// resetting its idle timer so a peer's peerReclaim does not steal it during slow
+// handling. Uses XClaimJustID (no payload transfer, no delivery-count inflation).
+// One goroutine per Consumer, runs for its entire lifetime.
+func (c *Consumer) heartbeatLoop(ctx context.Context) {
+	t := time.NewTicker(c.heartbeatInterval)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+			if p := c.inFlight.Load(); p != nil {
+				if err := c.claimFn(ctx, *p); err != nil && ctx.Err() == nil {
+					slog.Warn("heartbeat XCLAIM failed",
+						"stream", c.stream, "id", *p, "err", err)
+				}
+			}
+		}
+	}
+}
+
 // process dispatches one entry: parse (malformed → fatal), invoke the handler,
 // XACK on success (retried on transient error), retry transient handler errors
 // with backoff, and route poison through StreamErrorPolicy.
@@ -367,6 +439,11 @@ func (c *Consumer) process(ctx context.Context, m redis.XMessage) (retErr error)
 	if err != nil {
 		return c.policy.OnFatal(c.stream, fmt.Errorf("malformed envelope %s: %w", m.ID, err))
 	}
+
+	// Publish the in-flight ID so heartbeatLoop can reset its idle timer.
+	id := m.ID
+	c.inFlight.Store(&id)
+	defer c.inFlight.Store(nil)
 
 	backoff := 100 * time.Millisecond
 	retries := 0

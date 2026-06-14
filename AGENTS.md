@@ -4,7 +4,7 @@
 
 Before claiming any task complete (marking done, handing off for review, or asserting "all good"):
 
-1. **Tests pass**: `cd dasher && go test ./...`
+1. **Tests pass with race detection**: `cd dasher && go test -race ./...`
 2. **Lint clean**: `cd dasher && go run github.com/golangci/golangci-lint/cmd/golangci-lint@latest run ./...`
    — or equivalently: `cd dasher && make lint`
 

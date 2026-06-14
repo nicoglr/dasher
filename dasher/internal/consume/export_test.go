@@ -10,6 +10,18 @@ func SetAckFn(c *Consumer, fn func(ctx context.Context, stream, group, id string
 	c.ackFn = fn
 }
 
+// SetClaimFn overrides the XClaimJustID heartbeat function for unit tests,
+// allowing deterministic observation of heartbeat ticks.
+func SetClaimFn(c *Consumer, fn func(ctx context.Context, id string) error) {
+	c.claimFn = fn
+}
+
+// ExposeClaimFn calls the consumer's claimFn directly, allowing tests to drive
+// the heartbeat claim path (e.g. to reset an entry's idle timer in-test).
+func ExposeClaimFn(c *Consumer, ctx context.Context, id string) error {
+	return c.claimFn(ctx, id)
+}
+
 // ExposePeerReclaim calls peerReclaim directly for white-box tests.
 func ExposePeerReclaim(c *Consumer, ctx context.Context) error {
 	return c.peerReclaim(ctx)

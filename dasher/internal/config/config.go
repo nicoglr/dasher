@@ -99,12 +99,14 @@ var (
 	ErrBadBindKey      = errors.New("bind value must be a valid column identifier")
 	ErrBadLookupTTL    = errors.New("lookup ttl is invalid")
 
-	// Consumer-group lifecycle tuning.
+	// Consumer-group lifecycle tuning (see DASHER_* env vars).
 	ErrBadReclaimMinIdle         = errors.New("DASHER_RECLAIM_MIN_IDLE must be a positive duration")
 	ErrBadReclaimInterval        = errors.New("DASHER_RECLAIM_INTERVAL must be a positive duration")
 	ErrBadConsumerGCInterval     = errors.New("DASHER_CONSUMER_GC_INTERVAL must be a positive duration")
 	ErrBadConsumerGCTimeout      = errors.New("DASHER_CONSUMER_GC_TIMEOUT must be a positive duration")
 	ErrConsumerGCTimeoutTooSmall = errors.New("DASHER_CONSUMER_GC_TIMEOUT must be greater than DASHER_RECLAIM_MIN_IDLE")
+	ErrBadHeartbeatInterval      = errors.New("DASHER_HEARTBEAT_INTERVAL must be a positive duration")
+	ErrHeartbeatIntervalTooLarge = errors.New("DASHER_HEARTBEAT_INTERVAL must be <= DASHER_RECLAIM_MIN_IDLE/2")
 )
 
 type file struct {
@@ -125,6 +127,7 @@ type Config struct {
 	ReclaimInterval    time.Duration // how often the background peer-reclaim ticker fires
 	ConsumerGCInterval time.Duration // how often the dead-consumer GC ticker fires
 	ConsumerGCTimeout  time.Duration // idle threshold for dead-consumer removal
+	HeartbeatInterval  time.Duration // how often the heartbeat resets in-flight idle; default ReclaimMinIdle/2
 }
 
 // Load reads env vars + the YAML config file, selects this process's instance
@@ -170,6 +173,7 @@ func Load() (Config, error) {
 		consumer = "dasher"
 	}
 
+	// Parse ReclaimMinIdle first; HeartbeatInterval default depends on it.
 	reclaimMinIdle, err := parseDurationEnv("DASHER_RECLAIM_MIN_IDLE", 30*time.Second, ErrBadReclaimMinIdle)
 	if err != nil {
 		return Config{}, err
@@ -192,6 +196,18 @@ func Load() (Config, error) {
 			consumerGCTimeout, reclaimMinIdle, ErrConsumerGCTimeoutTooSmall)
 	}
 
+	// HeartbeatInterval default is reclaimMinIdle/2 (derived dynamically so a
+	// customised reclaimMinIdle is honoured). Cross-validate <= reclaimMinIdle/2.
+	heartbeatInterval, err := parseDurationEnv("DASHER_HEARTBEAT_INTERVAL", reclaimMinIdle/2, ErrBadHeartbeatInterval)
+	if err != nil {
+		return Config{}, err
+	}
+	if heartbeatInterval > reclaimMinIdle/2 {
+		return Config{}, fmt.Errorf(
+			"DASHER_HEARTBEAT_INTERVAL (%s) must be <= DASHER_RECLAIM_MIN_IDLE/2 (%s): %w",
+			heartbeatInterval, reclaimMinIdle/2, ErrHeartbeatIntervalTooLarge)
+	}
+
 	return Config{
 		InstanceID:         instanceID,
 		RedisAddr:          getenv("DASHER_REDIS_ADDR", "localhost:6379"),
@@ -203,6 +219,7 @@ func Load() (Config, error) {
 		ReclaimInterval:    reclaimInterval,
 		ConsumerGCInterval: consumerGCInterval,
 		ConsumerGCTimeout:  consumerGCTimeout,
+		HeartbeatInterval:  heartbeatInterval,
 	}, nil
 }
 

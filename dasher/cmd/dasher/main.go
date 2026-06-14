@@ -84,6 +84,7 @@ func main() {
 			consume.WithReclaimInterval(cfg.ReclaimInterval),
 			consume.WithConsumerGCInterval(cfg.ConsumerGCInterval),
 			consume.WithConsumerGCTimeout(cfg.ConsumerGCTimeout),
+			consume.WithHeartbeatInterval(cfg.HeartbeatInterval),
 		)
 		g.Go(func() error { return c.Run(gctx) })
 	}
