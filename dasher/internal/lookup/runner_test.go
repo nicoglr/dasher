@@ -59,11 +59,11 @@ func TestRunner_MultiRow_Poison(t *testing.T) {
 func TestRunner_NilBind_Poison(t *testing.T) {
 	fl := &fakeLookup{rows: []lookup.Row{{"email": "x"}}}
 	runner := lookup.NewRunner([]lookup.EnrichRule{makeRule(fl)})
-	// No "id" in data or old → nil bind → poison
-	assert.Equal(t, 0, fl.calls, "Resolve must NOT be called when bind is nil")
+	// No "id" in data or old → nil bind → poison, and Resolve must not be called.
 	_, err := runner.Run(context.Background(), map[string]any{}, nil)
 	require.Error(t, err)
 	assert.True(t, lookup.IsPoison(err))
+	assert.Equal(t, 0, fl.calls, "Resolve must NOT be called when bind is nil")
 }
 
 func TestRunner_TransientError_Propagates(t *testing.T) {
