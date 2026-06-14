@@ -14,8 +14,8 @@ func setEnv(t *testing.T, inst string) {
 	t.Setenv("DASHER_INSTANCE_ID", inst)
 	t.Setenv("DASHER_CONFIG", "testdata/config.yaml")
 	t.Setenv("DASHER_REDIS_ADDR", "localhost:6379")
-	t.Setenv("DASHER_AUTH_TOKEN", "t")
 	t.Setenv("DASHER_ESCALATE_AFTER", "")
+	t.Setenv("DASHER_TEST_INTERNAL_URL", "https://test.internal.svc")
 }
 
 func TestLoadSelectsInstance(t *testing.T) {
@@ -26,12 +26,11 @@ func TestLoadSelectsInstance(t *testing.T) {
 	require.Len(t, cfg.Instance.Streams, 2)
 	assert.Equal(t, "order-sync@v1", cfg.Instance.Streams[0].Handler)
 	assert.Equal(t, "cdc.orders", cfg.Instance.Streams[0].Stream)
-	assert.Equal(t, "https://bayer.internal.svc", cfg.Instance.Services.Internal.BaseURL)
+	assert.Equal(t, "DASHER_TEST_INTERNAL_URL", cfg.Instance.Services.Internal.URLEnv)
 	assert.Equal(t, "dasher", cfg.Group)
 	assert.NotEmpty(t, cfg.Consumer)
 	assert.Equal(t, 10, cfg.EscalateAfter)
 	assert.Equal(t, "localhost:6379", cfg.RedisAddr)
-	assert.Equal(t, "t", cfg.AuthToken)
 }
 
 func TestLoadMissingInstance(t *testing.T) {
@@ -113,10 +112,10 @@ func TestLoadPureTransformChain(t *testing.T) {
 func TestLoadExampleConfig(t *testing.T) {
 	// Verify config.example.yaml loads without error for the enrichment-example instance.
 	t.Setenv("DASHER_DB_DSN", "postgres://localhost/test")
+	t.Setenv("DASHER_INTERNAL_URL", "https://enrichment.internal.svc")
 	t.Setenv("DASHER_INSTANCE_ID", "enrichment-example")
 	t.Setenv("DASHER_CONFIG", "../../config.example.yaml")
 	t.Setenv("DASHER_REDIS_ADDR", "localhost:6379")
-	t.Setenv("DASHER_AUTH_TOKEN", "t")
 	t.Setenv("DASHER_ESCALATE_AFTER", "")
 	_, err := config.Load()
 	require.NoError(t, err)
@@ -154,4 +153,12 @@ func TestLoadBadLookupTTL(t *testing.T) {
 	setEnv(t, "bad-lookup-ttl-99980")
 	_, err := config.Load()
 	require.ErrorIs(t, err, config.ErrBadLookupTTL)
+}
+
+func TestLoadMissingURLEnv(t *testing.T) {
+	// url_env is set to DASHER_MISSING_INTERNAL_URL but that env var is not set.
+	t.Setenv("DASHER_MISSING_INTERNAL_URL", "")
+	setEnv(t, "missing-url-env-99978")
+	_, err := config.Load()
+	require.ErrorIs(t, err, config.ErrMissingURLEnv)
 }

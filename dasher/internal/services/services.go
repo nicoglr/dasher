@@ -45,15 +45,15 @@ type Services struct {
 // New builds the per-instance Services. It takes a context (used by pgxpool
 // config parsing — pool connect is lazy, so a down DB does not fail startup).
 // Returns an error if DB config is present but invalid.
-// Internal is nil when base_url is empty.
+// Internal is nil when url_env is empty.
 // DB is nil when dsn_env is not configured.
-func New(ctx context.Context, cfg config.InstanceConfig, token string) (*Services, error) {
+func New(ctx context.Context, cfg config.InstanceConfig) (*Services, error) {
 	svc := &Services{}
 
-	if cfg.Services.Internal.BaseURL != "" {
+	if cfg.Services.Internal.URLEnv != "" {
 		svc.Internal = &InternalClient{
-			baseURL: cfg.Services.Internal.BaseURL,
-			token:   token,
+			baseURL: os.Getenv(cfg.Services.Internal.URLEnv),
+			token:   os.Getenv(cfg.Services.Internal.TokenEnv),
 			hc:      &http.Client{Timeout: 30 * time.Second},
 		}
 	}

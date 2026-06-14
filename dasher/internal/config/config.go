@@ -53,7 +53,11 @@ type StreamBinding struct {
 
 // InternalServiceConfig is the per-instance config for the internal service client.
 type InternalServiceConfig struct {
-	BaseURL string `yaml:"base_url"`
+	// URLEnv is the name of the environment variable holding the base URL.
+	URLEnv string `yaml:"url_env"`
+	// TokenEnv is the name of the environment variable holding the bearer token.
+	// Optional — omit for unauthenticated services.
+	TokenEnv string `yaml:"token_env"`
 }
 
 // ServicesConfig groups the shared per-instance service config.
@@ -89,7 +93,9 @@ var (
 	// process environment. If the DSN env var is set after process start
 	// (e.g. in test harnesses), validation passes but services.New will
 	// leave DB nil, causing a nil-dereference at lookup time.
-	ErrMissingDBConfig = errors.New("enrich requires db config (services.db.dsn_env)")
+	ErrMissingDBConfig  = errors.New("enrich requires db config (services.db.dsn_env)")
+	// ErrMissingURLEnv is returned when url_env is set but the named env var is empty.
+	ErrMissingURLEnv = errors.New("services.internal.url_env is set but the env var is empty")
 	ErrBadBindKey      = errors.New("bind value must be a valid column identifier")
 	ErrBadLookupTTL    = errors.New("lookup ttl is invalid")
 )
@@ -102,7 +108,6 @@ type file struct {
 type Config struct {
 	InstanceID    string
 	RedisAddr     string
-	AuthToken     string
 	Group         string // consumer group name, always "dasher" in v0
 	Consumer      string // consumer name = process identity (hostname)
 	EscalateAfter int    // consecutive transient retries before WARN→ERROR escalation
@@ -155,7 +160,6 @@ func Load() (Config, error) {
 	return Config{
 		InstanceID:    instanceID,
 		RedisAddr:     getenv("DASHER_REDIS_ADDR", "localhost:6379"),
-		AuthToken:     os.Getenv("DASHER_AUTH_TOKEN"),
 		Group:         "dasher",
 		Consumer:      consumer,
 		EscalateAfter: escalate,
@@ -179,6 +183,11 @@ func validateInstance(inst InstanceConfig) error {
 				return fmt.Errorf("lookup %q: invalid ttl %q: %w", name, spec.TTL, ErrBadLookupTTL)
 			}
 		}
+	}
+
+	// Validate internal service URL env var.
+	if inst.Services.Internal.URLEnv != "" && os.Getenv(inst.Services.Internal.URLEnv) == "" {
+		return ErrMissingURLEnv
 	}
 
 	// Check whether any binding has enrich (need DB config once).

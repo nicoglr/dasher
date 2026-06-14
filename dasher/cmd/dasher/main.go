@@ -44,7 +44,7 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	svc, err := services.New(ctx, cfg.Instance, cfg.AuthToken)
+	svc, err := services.New(ctx, cfg.Instance)
 	if err != nil {
 		slog.Error("init services", "err", err)
 		os.Exit(1)

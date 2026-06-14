@@ -2,7 +2,7 @@ instances:
   bayer-17909:
     services:
       internal:
-        base_url: https://bayer.internal.svc
+        url_env: DASHER_TEST_INTERNAL_URL
     streams:
       - stream: cdc.orders
         handler: order-sync@v1
@@ -11,33 +11,33 @@ instances:
   beigene-22001:
     services:
       internal:
-        base_url: https://beigene.internal.svc
+        url_env: DASHER_TEST_INTERNAL_URL
     streams:
       - stream: cdc.orders
         handler: order-sync@v2
   empty-99999:
     services:
       internal:
-        base_url: https://empty.internal.svc
+        url_env: DASHER_TEST_INTERNAL_URL
     streams: []
   no-handler-99998:
     services:
       internal:
-        base_url: https://x.internal.svc
+        url_env: DASHER_TEST_INTERNAL_URL
     streams:
       - stream: cdc.orders
         handler: ""
   no-stream-name-99997:
     services:
       internal:
-        base_url: https://x.internal.svc
+        url_env: DASHER_TEST_INTERNAL_URL
     streams:
       - stream: ""
         handler: order-sync@v1
   pure-transform-99990:
     services:
       internal:
-        base_url: https://x.internal.svc
+        url_env: DASHER_TEST_INTERNAL_URL
       db:
         dsn_env: DASHER_TEST_DSN
         max_conns: 4
@@ -57,7 +57,7 @@ instances:
   enriched-terminal-99989:
     services:
       internal:
-        base_url: https://x.internal.svc
+        url_env: DASHER_TEST_INTERNAL_URL
       db:
         dsn_env: DASHER_TEST_DSN
     lookups:
@@ -75,7 +75,7 @@ instances:
   handler-and-emit-99988:
     services:
       internal:
-        base_url: https://x.internal.svc
+        url_env: DASHER_TEST_INTERNAL_URL
     streams:
       - stream: cdc.orders
         handler: order-sync@v1
@@ -83,7 +83,7 @@ instances:
   emit-self-loop-99987:
     services:
       internal:
-        base_url: https://x.internal.svc
+        url_env: DASHER_TEST_INTERNAL_URL
     streams:
       - stream: cdc.orders
         emit: cdc.orders
@@ -91,7 +91,7 @@ instances:
   emit-cycle-99986:
     services:
       internal:
-        base_url: https://x.internal.svc
+        url_env: DASHER_TEST_INTERNAL_URL
     streams:
       - stream: cdc.orders
         emit: enriched.orders
@@ -101,7 +101,7 @@ instances:
   valid-transform-chain-99979:
     services:
       internal:
-        base_url: https://x.internal.svc
+        url_env: DASHER_TEST_INTERNAL_URL
     streams:
       - stream: cdc.events
         emit: enriched.events
@@ -110,7 +110,7 @@ instances:
   unknown-lookup-ref-99985:
     services:
       internal:
-        base_url: https://x.internal.svc
+        url_env: DASHER_TEST_INTERNAL_URL
       db:
         dsn_env: DASHER_TEST_DSN
     lookups:
@@ -128,7 +128,7 @@ instances:
   unknown-lookup-type-99984:
     services:
       internal:
-        base_url: https://x.internal.svc
+        url_env: DASHER_TEST_INTERNAL_URL
     lookups:
       user_email:
         type: http
@@ -139,7 +139,7 @@ instances:
   enrich-no-db-99983:
     services:
       internal:
-        base_url: https://x.internal.svc
+        url_env: DASHER_TEST_INTERNAL_URL
     lookups:
       user_email:
         type: sql
@@ -155,7 +155,7 @@ instances:
   bad-bind-key-99982:
     services:
       internal:
-        base_url: https://x.internal.svc
+        url_env: DASHER_TEST_INTERNAL_URL
       db:
         dsn_env: DASHER_TEST_DSN
     lookups:
@@ -173,12 +173,19 @@ instances:
   bad-lookup-ttl-99980:
     services:
       internal:
-        base_url: https://x.internal.svc
+        url_env: DASHER_TEST_INTERNAL_URL
     lookups:
       user_email:
         type: sql
         ttl: "24x"
         sql: "SELECT email FROM users WHERE id = @user_id"
+    streams:
+      - stream: cdc.orders
+        handler: order-sync@v1
+  missing-url-env-99978:
+    services:
+      internal:
+        url_env: DASHER_MISSING_INTERNAL_URL
     streams:
       - stream: cdc.orders
         handler: order-sync@v1

@@ -2,7 +2,8 @@ instances:
   bayer-17909:
     services:
       internal:
-        base_url: https://bayer.internal.svc
+        url_env:   BAYER_INTERNAL_URL    # env var holding the base URL
+        token_env: BAYER_INTERNAL_TOKEN  # env var holding the bearer token (optional)
     streams:
       - stream: cdc.orders
         handler: order-sync@v1
@@ -11,7 +12,8 @@ instances:
   beigene-22001:
     services:
       internal:
-        base_url: https://beigene.internal.svc
+        url_env:   BEIGENE_INTERNAL_URL
+        token_env: BEIGENE_INTERNAL_TOKEN
     streams:
       - stream: cdc.orders
         handler: order-sync@v2
@@ -24,7 +26,8 @@ instances:
   enrichment-example:
     services:
       internal:
-        base_url: https://enrichment.internal.svc
+        url_env:   DASHER_INTERNAL_URL    # name of env var holding the base URL
+        token_env: DASHER_INTERNAL_TOKEN  # name of env var holding the bearer token (optional)
       # db: pool for sql lookups; DSN comes from env (never hardcode secrets).
       # Point at the PRIMARY.
       db:

@@ -23,7 +23,8 @@ echo "=== Starting dasher in background ==="
 DASHER_INSTANCE_ID="$INSTANCE" \
   DASHER_CONFIG=config.smoke.yaml \
   DASHER_REDIS_ADDR="$REDIS_ADDR" \
-  DASHER_AUTH_TOKEN=t \
+  BAYER_INTERNAL_URL=http://localhost \
+  BAYER_INTERNAL_TOKEN=t \
   /tmp/dasher &
 DASHER_PID=$!
 trap 'kill $DASHER_PID 2>/dev/null || true' EXIT

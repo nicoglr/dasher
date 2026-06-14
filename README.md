@@ -27,9 +27,12 @@ Malformed envelope (unparseable stream entry) is also fatal.
 ```
 DASHER_INSTANCE_ID   which instance this process serves
 DASHER_CONFIG        path to YAML config file
-DASHER_AUTH_TOKEN    secret token for internal service calls
 DASHER_REDIS_ADDR    Redis address
 ```
+
+The internal service URL and bearer token are configured **per instance** via
+`url_env` and `token_env` in the YAML — each names the environment variable
+that holds the value (never hardcoded, mirrors the `db.dsn_env` pattern).
 
 Example `config.yaml`:
 
@@ -38,7 +41,8 @@ instances:
   bayer-17909:
     services:
       internal:
-        base_url: https://bayer.internal.svc
+        url_env:   BAYER_INTERNAL_URL    # env var holding the base URL
+        token_env: BAYER_INTERNAL_TOKEN  # env var holding the bearer token (optional)
     streams:
       - stream: cdc.orders      # full key: bayer-17909.cdc.orders
         handler: order-sync@v1

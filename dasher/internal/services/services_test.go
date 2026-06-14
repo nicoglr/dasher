@@ -13,16 +13,16 @@ import (
 	"4gclinical.com/dasher/internal/services"
 )
 
-func TestNewReturnsNilInternalWhenBaseURLEmpty(t *testing.T) {
+func TestNewReturnsNilInternalWhenURLEnvEmpty(t *testing.T) {
 	cfg := config.InstanceConfig{}
-	svc, err := services.New(context.Background(), cfg, "secret")
+	svc, err := services.New(context.Background(), cfg)
 	require.NoError(t, err)
 	assert.Nil(t, svc.Internal)
 }
 
 func TestNewReturnsNilDBWhenNotConfigured(t *testing.T) {
 	cfg := config.InstanceConfig{}
-	svc, err := services.New(context.Background(), cfg, "secret")
+	svc, err := services.New(context.Background(), cfg)
 	require.NoError(t, err)
 	assert.Nil(t, svc.DB)
 }
@@ -34,7 +34,7 @@ func TestNewBadDSNReturnsError(t *testing.T) {
 			DB: config.DBConfig{DSNEnv: "DASHER_SVC_TEST_DSN"},
 		},
 	}
-	_, err := services.New(context.Background(), cfg, "")
+	_, err := services.New(context.Background(), cfg)
 	require.Error(t, err)
 }
 
@@ -46,7 +46,7 @@ func TestNewValidDSNParsesPool(t *testing.T) {
 			DB: config.DBConfig{DSNEnv: "DASHER_SVC_TEST_DSN", MaxConns: 2},
 		},
 	}
-	svc, err := services.New(context.Background(), cfg, "")
+	svc, err := services.New(context.Background(), cfg)
 	require.NoError(t, err)
 	require.NotNil(t, svc.DB)
 	svc.Close() // lazy pool, no live connection
@@ -63,10 +63,15 @@ func TestInternalClientWiring(t *testing.T) {
 
 	cfg := config.InstanceConfig{
 		Services: config.ServicesConfig{
-			Internal: config.InternalServiceConfig{BaseURL: srv.URL},
+			Internal: config.InternalServiceConfig{
+				URLEnv:   "DASHER_SVC_TEST_URL",
+				TokenEnv: "DASHER_SVC_TEST_TOKEN",
+			},
 		},
 	}
-	svc, err := services.New(context.Background(), cfg, "secret")
+	t.Setenv("DASHER_SVC_TEST_URL", srv.URL)
+	t.Setenv("DASHER_SVC_TEST_TOKEN", "secret")
+	svc, err := services.New(context.Background(), cfg)
 	require.NoError(t, err)
 
 	resp, err := svc.Internal.Do(context.Background(), http.MethodGet, "/ping", nil)
