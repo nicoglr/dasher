@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sync/atomic"
 	"time"
 
 	"github.com/redis/go-redis/v9"
@@ -18,6 +19,7 @@ import (
 type Producer struct {
 	client     *redis.Client
 	instanceID string
+	closed     atomic.Bool
 }
 
 // New returns a Producer that prefixes every stream with "<instanceID>.".
@@ -25,9 +27,21 @@ func New(client *redis.Client, instanceID string) *Producer {
 	return &Producer{client: client, instanceID: instanceID}
 }
 
+// Close marks the producer as closed. Any subsequent Emit call will return an
+// error immediately. Close does NOT close the underlying Redis client — the
+// client is owned by the caller (main) and shared with other components.
+func (p *Producer) Close() {
+	p.closed.Store(true)
+}
+
 // Emit publishes evt to "<instanceID>.<stream>" via a single ctx-bound XADD.
-// Returns the raw Redis error on failure — no internal retry.
+// Returns an error if the producer has been closed, or the raw Redis error on
+// failure — no internal retry.
 func (p *Producer) Emit(ctx context.Context, stream string, evt dasher.Event) error {
+	if p.closed.Load() {
+		return fmt.Errorf("produce: emit after close")
+	}
+
 	key := p.instanceID + "." + stream
 
 	fields := map[string]any{

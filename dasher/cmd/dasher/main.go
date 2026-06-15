@@ -93,9 +93,13 @@ func main() {
 		slog.Error("dasher exited", "err", werr)
 	}
 
-	// Shutdown ordering: close the DB pool strictly AFTER all consumers stop.
-	// Placing svc.Close() here (not as a defer before g.Wait()) ensures no
-	// consumer can attempt a lookup after the pool is closed.
+	// Shutdown ordering (enforced by code structure, not timing):
+	//   consumers drain (g.Wait) -> producer closes -> DB pool closes -> exit.
+	// producer.Close() prevents any stray post-drain Emit from publishing.
+	// It does NOT close rdb — rdb is owned by main and shared with consumers;
+	// its defer fires after this block.
+	// svc.Close() keeps the DB pool alive until all consumers have stopped.
+	producer.Close()
 	svc.Close()
 
 	if werr != nil {

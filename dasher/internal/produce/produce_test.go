@@ -80,6 +80,28 @@ func TestEmitOmitsEmptyOldAndEnrichment(t *testing.T) {
 	assert.False(t, hasEnrichment)
 }
 
+func TestEmitAfterCloseReturnsError(t *testing.T) {
+	p, _ := newTestProducer(t)
+	p.Close()
+
+	err := p.Emit(context.Background(), "events", baseEvent())
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "emit after close")
+}
+
+func TestEmitAfterCloseDoesNotPublish(t *testing.T) {
+	p, mr := newTestProducer(t)
+	p.Close()
+
+	_ = p.Emit(context.Background(), "events", baseEvent())
+
+	client := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	defer client.Close()
+	msgs, err := client.XRange(context.Background(), "test-instance.events", "-", "+").Result()
+	require.NoError(t, err)
+	assert.Empty(t, msgs, "no message should be published after Close")
+}
+
 func TestEmitReturnsErrorNoRetry(t *testing.T) {
 	mr := miniredis.RunT(t)
 	client := redis.NewClient(&redis.Options{Addr: mr.Addr()})
