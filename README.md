@@ -98,9 +98,15 @@ Handlers are registered by name and bound to streams in config. This indirection
 
 The compiled-in registry (`registry.Default()`, in `internal/registry`) binds a
 fixed set of handler names. Each name in your config's `handler:` field must
-match one of these. All bundled handlers do the same thing — JSON-marshal the
-event and `POST` it to `/events` on the configured service — but differ in
-**which authenticated client** they forward through.
+match one of these.
+
+In v0 there are really only **two distinct behaviours** — forward through the
+internal client, or forward through the gateway client. All four internal-service
+names (`order-sync@v1`, `order-sync@v2`, `product-sync`, `billing-sync`) are bound
+to the *same* `HandlerFunc` and are **behaviourally identical aliases**: each
+JSON-marshals the event and `POST`s it to `/events` on the internal service. The
+handler does not inspect its own name, the table, or the op — so `order-sync` and
+`billing-sync` do exactly the same thing today.
 
 | Handler name | Forwards through | Client / auth |
 |---|---|---|
@@ -109,6 +115,12 @@ event and `POST` it to `/events` on the configured service — but differ in
 | `product-sync` | internal service | `services.internal` — static bearer token |
 | `billing-sync` | internal service | `services.internal` — static bearer token |
 | `gateway-sync` | gateway service | `services.gateway` — JWT, auto-refreshed |
+
+The distinct names exist as **labels**, not behaviour: they let different streams
+bind by meaningful name, they show up in config and logs, and they are the
+wazero seam — a future registry could resolve each name to a *different*
+dynamically-loaded module without changing config. The only behavioural split
+today is internal (`*-sync`) vs. gateway (`gateway-sync`).
 
 Notes:
 
