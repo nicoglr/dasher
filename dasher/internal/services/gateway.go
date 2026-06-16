@@ -44,19 +44,11 @@ func (c *GatewayClient) Do(ctx context.Context, method, path string, body io.Rea
 
 // getToken returns a valid token, re-authenticating if needed.
 //
-// The mutex is held for the full duration of authenticate (including its HTTP
-// call). This serialises concurrent callers: if N goroutines all find the token
-// stale simultaneously, goroutine A acquires the lock and calls api_login;
-// B…N block on the lock. When A succeeds, the re-check at the top of this
-// function lets B…N return the freshly cached token without hitting api_login
-// again.
-//
-// On auth failure the lock is still held for authenticate's full timeout (10s),
-// so concurrent callers stagger naturally: each waits ~10s for the previous
-// attempt, re-checks (token still stale), tries api_login itself, and fails.
-// This amplifies a single auth failure into O(N) sequential api_login calls,
-// but the consume layer's exponential back-off spaces out the handler retries
-// that follow, so the burst is bounded and self-limiting.
+// The mutex is held across the authenticate HTTP call to coalesce concurrent
+// refreshes: the first caller does the api_login; the rest re-check after
+// acquiring the lock and return the cached token. On auth failure, concurrent
+// callers stagger by ~10s (the auth timeout) and each retries, but the consume
+// layer's exponential back-off limits the overall burst.
 func (c *GatewayClient) getToken(ctx context.Context) (string, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
