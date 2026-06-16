@@ -1,5 +1,5 @@
-// Package enrich_test — end-to-end integration test covering the full
-// cdc → enrich → enriched pipeline via a real consume.Consumer and real
+// Package middleware_test — end-to-end integration test covering the full
+// cdc → middleware → enriched pipeline via a real consume.Consumer and real
 // produce.Producer, with miniredis as the stream backend.
 package middleware_test
 
