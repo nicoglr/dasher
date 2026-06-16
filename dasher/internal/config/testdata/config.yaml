@@ -189,3 +189,37 @@ instances:
     streams:
       - stream: cdc.orders
         handler: order-sync@v1
+  # Gateway config tests
+  gateway-valid-99970:
+    services:
+      internal:
+        url_env: DASHER_TEST_INTERNAL_URL
+      gateway:
+        url_env: DASHER_TEST_GW_URL
+        app_instance_code_env: DASHER_TEST_GW_CODE
+        api_key_env: DASHER_TEST_GW_KEY
+    streams:
+      - stream: cdc.orders
+        handler: gateway-sync
+  gateway-missing-url-99969:
+    services:
+      internal:
+        url_env: DASHER_TEST_INTERNAL_URL
+      gateway:
+        url_env: DASHER_MISSING_GW_URL
+        app_instance_code_env: DASHER_TEST_GW_CODE
+        api_key_env: DASHER_TEST_GW_KEY
+    streams:
+      - stream: cdc.orders
+        handler: gateway-sync
+  gateway-missing-creds-99968:
+    services:
+      internal:
+        url_env: DASHER_TEST_INTERNAL_URL
+      gateway:
+        url_env: DASHER_TEST_GW_URL
+        app_instance_code_env: ""
+        api_key_env: ""
+    streams:
+      - stream: cdc.orders
+        handler: gateway-sync
