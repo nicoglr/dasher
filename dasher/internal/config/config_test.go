@@ -311,3 +311,28 @@ func TestLoadInstanceScopeNoSelfLoop(t *testing.T) {
 	require.NoError(t, err)
 }
 
+func TestGatewayValidConfig(t *testing.T) {
+	setEnv(t, "gateway-valid-99970")
+	t.Setenv("DASHER_TEST_GW_URL", "https://gateway.example.com")
+	t.Setenv("DASHER_TEST_GW_CODE", "myapp")
+	t.Setenv("DASHER_TEST_GW_KEY", "secret")
+	cfg, err := config.Load()
+	require.NoError(t, err)
+	assert.Equal(t, "DASHER_TEST_GW_URL", cfg.Instance.Services.Gateway.URLEnv)
+}
+
+func TestGatewayMissingURLEnvVar(t *testing.T) {
+	setEnv(t, "gateway-missing-url-99969")
+	// DASHER_MISSING_GW_URL not set
+	t.Setenv("DASHER_TEST_GW_CODE", "myapp")
+	t.Setenv("DASHER_TEST_GW_KEY", "secret")
+	_, err := config.Load()
+	require.ErrorIs(t, err, config.ErrMissingGatewayURLEnv)
+}
+
+func TestGatewayMissingCredentials(t *testing.T) {
+	setEnv(t, "gateway-missing-creds-99968")
+	t.Setenv("DASHER_TEST_GW_URL", "https://gateway.example.com")
+	_, err := config.Load()
+	require.ErrorIs(t, err, config.ErrMissingGatewayCredentials)
+}

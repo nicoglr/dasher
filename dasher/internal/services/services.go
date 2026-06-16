@@ -38,6 +38,8 @@ func (c *InternalClient) Do(ctx context.Context, method, path string, body io.Re
 // Services is the shared capability bundle handed to handlers via InstanceContext.
 type Services struct {
 	Internal *InternalClient
+	// Gateway is the gateway-authenticated client. Nil when not configured.
+	Gateway *GatewayClient
 	// DB is the pgxpool for sql lookups. Nil when no DB is configured.
 	DB *pgxpool.Pool
 }
@@ -55,6 +57,17 @@ func New(ctx context.Context, cfg config.InstanceConfig) (*Services, error) {
 			baseURL: os.Getenv(cfg.Services.Internal.URLEnv),
 			token:   os.Getenv(cfg.Services.Internal.TokenEnv),
 			hc:      &http.Client{Timeout: 30 * time.Second},
+		}
+	}
+
+	if cfg.Services.Gateway.URLEnv != "" {
+		baseURL := os.Getenv(cfg.Services.Gateway.URLEnv)
+		svc.Gateway = &GatewayClient{
+			baseURL:         baseURL,
+			authURL:         strings.TrimRight(baseURL, "/") + "/api/auth/api_login/",
+			appInstanceCode: os.Getenv(cfg.Services.Gateway.AppInstanceCodeEnv),
+			apiKey:          os.Getenv(cfg.Services.Gateway.APIKeyEnv),
+			hc:              &http.Client{Timeout: 30 * time.Second},
 		}
 	}
 

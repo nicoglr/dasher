@@ -52,6 +52,16 @@ type StreamBinding struct {
 	Enrich  []EnrichRuleConfig `yaml:"enrich"`
 }
 
+// GatewayServiceConfig configures the optional gateway-authenticated client.
+type GatewayServiceConfig struct {
+	// URLEnv names the env var holding the gateway base URL.
+	URLEnv string `yaml:"url_env"`
+	// AppInstanceCodeEnv names the env var holding this app's instance code.
+	AppInstanceCodeEnv string `yaml:"app_instance_code_env"`
+	// APIKeyEnv names the env var holding the gateway API secret key.
+	APIKeyEnv string `yaml:"api_key_env"`
+}
+
 // InternalServiceConfig is the per-instance config for the internal service client.
 type InternalServiceConfig struct {
 	// URLEnv is the name of the environment variable holding the base URL.
@@ -64,6 +74,7 @@ type InternalServiceConfig struct {
 // ServicesConfig groups the shared per-instance service config.
 type ServicesConfig struct {
 	Internal InternalServiceConfig `yaml:"internal"`
+	Gateway  GatewayServiceConfig  `yaml:"gateway"`
 	DB       DBConfig              `yaml:"db"`
 }
 
@@ -98,6 +109,10 @@ var (
 	ErrMissingDBConfig  = errors.New("enrich requires db config (services.db.dsn_env)")
 	// ErrMissingURLEnv is returned when url_env is set but the named env var is empty.
 	ErrMissingURLEnv = errors.New("services.internal.url_env is set but the env var is empty")
+	// ErrMissingGatewayURLEnv is returned when url_env is set but the named env var is empty.
+	ErrMissingGatewayURLEnv = errors.New("services.gateway.url_env is set but the env var is empty")
+	// ErrMissingGatewayCredentials is returned when gateway url_env is set but credentials are missing.
+	ErrMissingGatewayCredentials = errors.New("services.gateway requires app_instance_code_env and api_key_env")
 	ErrBadBindKey      = errors.New("bind value must be a valid column identifier")
 	ErrBadLookupTTL    = errors.New("lookup ttl is invalid")
 
@@ -246,6 +261,17 @@ func validateInstance(inst InstanceConfig) error {
 	// Validate internal service URL env var.
 	if inst.Services.Internal.URLEnv != "" && os.Getenv(inst.Services.Internal.URLEnv) == "" {
 		return ErrMissingURLEnv
+	}
+
+	// Validate gateway service config.
+	if inst.Services.Gateway.URLEnv != "" {
+		if os.Getenv(inst.Services.Gateway.URLEnv) == "" {
+			return ErrMissingGatewayURLEnv
+		}
+		if inst.Services.Gateway.AppInstanceCodeEnv == "" || inst.Services.Gateway.APIKeyEnv == "" ||
+			os.Getenv(inst.Services.Gateway.AppInstanceCodeEnv) == "" || os.Getenv(inst.Services.Gateway.APIKeyEnv) == "" {
+			return ErrMissingGatewayCredentials
+		}
 	}
 
 	// Check whether any binding has enrich (need DB config once).

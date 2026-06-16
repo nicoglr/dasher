@@ -20,6 +20,20 @@ instances:
       - stream: cdc.products
         handler: product-sync
 
+  # Example: gateway-authenticated instance.
+  # The gateway client logs in with app_instance_code + api_key (machine-to-machine),
+  # caches the returned JWT, and refreshes it automatically near expiry.
+  # Forward events through it with the `gateway-sync` handler.
+  gateway-example:
+    services:
+      gateway:
+        url_env:               GATEWAY_URL         # base URL; api_login = <url>/api/auth/api_login/
+        app_instance_code_env: APP_INSTANCE_CODE   # env var holding this app's instance code
+        api_key_env:           GATEWAY_API_SECRET  # env var holding the gateway API secret key
+    streams:
+      - stream: cdc.orders
+        handler: gateway-sync
+
   # Example: enrichment instance
   # Enrichment lets Dasher resolve lookup data (e.g. a user's email by role ID)
   # before dispatching downstream, keeping queries off the WALker replication path.

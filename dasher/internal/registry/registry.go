@@ -22,11 +22,13 @@ func (r Registry) Lookup(name string) (dasher.Handler, bool) {
 // Default returns the v0 handler registry binding all known handler names to
 // the compiled-in Forward implementation.
 func Default() Registry {
-	f := dasher.HandlerFunc(handlers.Forward)
+	internal := dasher.HandlerFunc(handlers.Forward(handlers.ServiceInternal))
+	gateway := dasher.HandlerFunc(handlers.Forward(handlers.ServiceGateway))
 	return Registry{
-		"order-sync@v1": f,
-		"order-sync@v2": f,
-		"product-sync":  f,
-		"billing-sync":  f,
+		"order-sync@v1": internal,
+		"order-sync@v2": internal,
+		"product-sync":  internal,
+		"billing-sync":  internal,
+		"gateway-sync":  gateway,
 	}
 }
