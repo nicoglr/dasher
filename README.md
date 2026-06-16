@@ -34,6 +34,24 @@ The internal service URL and bearer token are configured **per instance** via
 `url_env` and `token_env` in the YAML — each names the environment variable
 that holds the value (never hardcoded, mirrors the `db.dsn_env` pattern).
 
+A second, optional **gateway** client (`services.gateway`) authenticates with
+machine-to-machine JWTs instead of a static token: it POSTs
+`{app_instance_code, api_key}` to `<gateway_url>/api/auth/api_login/`, caches the
+returned `access` token, and refreshes it automatically when it nears expiry
+(60s buffer, read from the JWT `exp` claim). Use the `gateway-sync` handler to
+forward through it. All three values are named via env vars:
+
+```yaml
+services:
+  gateway:
+    url_env:               GATEWAY_URL         # base URL + api_login endpoint
+    app_instance_code_env: APP_INSTANCE_CODE   # this app's instance code
+    api_key_env:           GATEWAY_API_SECRET  # gateway API secret key
+```
+
+If `gateway.url_env` is set, all three env vars must be non-empty or config
+validation fails (`ErrMissingGatewayURLEnv` / `ErrMissingGatewayCredentials`).
+
 Example `config.yaml`:
 
 ```yaml
@@ -60,7 +78,7 @@ internal/config         YAML + env load, instance selection, validation
 internal/consume        XAUTOCLAIM reclaim, XREADGROUP loop, XACK, retry/backoff
 internal/event          parse stream entry → Event (UseNumber for numeric precision)
 internal/registry       name → Handler map (wazero seam for future hot-swap)
-internal/services       authenticated HTTP client to the internal service
+internal/services       authenticated HTTP clients (internal: static token; gateway: JWT)
 internal/handlers       concrete handlers (order-sync, product-sync, …)
 ```
 
@@ -75,6 +93,36 @@ type Handler interface {
 Handlers are registered by name and bound to streams in config. This indirection is the wazero seam for future hot-swappable modules.
 
 **Handlers must be idempotent** — delivery is at-least-once; use `lsn` for dedup.
+
+### Bundled handlers
+
+The compiled-in registry (`registry.Default()`, in `internal/registry`) binds a
+fixed set of handler names. Each name in your config's `handler:` field must
+match one of these. All bundled handlers do the same thing — JSON-marshal the
+event and `POST` it to `/events` on the configured service — but differ in
+**which authenticated client** they forward through.
+
+| Handler name | Forwards through | Client / auth |
+|---|---|---|
+| `order-sync@v1` | internal service | `services.internal` — static bearer token |
+| `order-sync@v2` | internal service | `services.internal` — static bearer token |
+| `product-sync` | internal service | `services.internal` — static bearer token |
+| `billing-sync` | internal service | `services.internal` — static bearer token |
+| `gateway-sync` | gateway service | `services.gateway` — JWT, auto-refreshed |
+
+Notes:
+
+- The `@vN` suffix is **opaque** — it is not parsed or version-resolved in v0;
+  the names are just distinct registry keys.
+- If a handler's target client is **not configured** for the instance (e.g.
+  `gateway-sync` with no `services.gateway` block), the handler is a **no-op**
+  that returns `nil` — the event is ACKed without being forwarded.
+- Response status maps to the standard failure semantics above: `2xx` → success,
+  `5xx`/network error → transient retry, `4xx` → poison.
+
+Adding a new handler name means editing `registry.Default()` and pointing the
+name at `handlers.Forward(handlers.ServiceInternal)` or
+`handlers.Forward(handlers.ServiceGateway)`.
 
 ## Relationship to WALker
 
