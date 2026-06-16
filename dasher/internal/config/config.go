@@ -267,10 +267,7 @@ func validateInstance(inst InstanceConfig) error {
 			return ErrMissingStreamName
 		}
 		// Validate scope (empty defaults to "instance").
-		scope := s.Scope
-		if scope == "" {
-			scope = "instance"
-		}
+		scope := scopeOrDefault(s.Scope)
 		if scope != "instance" && scope != "shared" {
 			return fmt.Errorf("stream %q: %w %q", s.Stream, ErrBadStreamScope, s.Scope)
 		}
@@ -280,7 +277,7 @@ func validateInstance(inst InstanceConfig) error {
 		}
 		// Self-loop check in resolved-key space.
 		if s.Emit != "" {
-			consumeKey := ResolveKey(s.Stream, scope, inst.ID)
+			consumeKey := ResolveKey(s.Stream, scope, inst.ID) // scope already normalised above
 			emitKey := ResolveKey(s.Emit, "shared", inst.ID)
 			if consumeKey == emitKey {
 				return fmt.Errorf("stream %q: %w", s.Stream, ErrSelfEmit)
@@ -310,7 +307,9 @@ func validateInstance(inst InstanceConfig) error {
 // ResolveKey returns the Redis stream key for a logical stream name.
 // scope "instance" (or empty) → "<instanceID>.<name>".
 // scope "shared" → "<name>" (raw key; no prefix).
-// Emit is always resolved as "shared".
+// Callers must pass "shared" for emit targets (emit is always global).
+// Any unrecognised scope value falls back to "instance" behaviour; validation
+// in validateInstance rejects unknown values before this is reached.
 func ResolveKey(name, scope, instanceID string) string {
 	if scope == "shared" {
 		return name
@@ -318,23 +317,26 @@ func ResolveKey(name, scope, instanceID string) string {
 	return instanceID + "." + name
 }
 
+// scopeOrDefault returns s when non-empty, else "instance".
+func scopeOrDefault(s string) string {
+	if s == "" {
+		return "instance"
+	}
+	return s
+}
+
 // detectEmitCycles performs a DFS back-edge walk on the emit graph in
 // resolved-key space (consume key vs shared emit key).
 // A → B where B is terminal (no further emit) is valid.
 // A → B → … → A is a genuine cycle and returns ErrEmitCycle.
 func detectEmitCycles(streams []StreamBinding, instanceID string) error {
-	// Normalize scope and build adjacency in resolved-key space.
+	// Build adjacency in resolved-key space.
 	// consume node = ResolveKey(stream, scope, id)
-	// emit edge target = ResolveKey(emit, "shared", id)
-	type node = string
-	emitEdge := make(map[node]node, len(streams))
+	// emit edge target = ResolveKey(emit, "shared", id)  (emit is always global)
+	emitEdge := make(map[string]string, len(streams))
 	for _, s := range streams {
 		if s.Emit != "" {
-			scope := s.Scope
-			if scope == "" {
-				scope = "instance"
-			}
-			consumeKey := ResolveKey(s.Stream, scope, instanceID)
+			consumeKey := ResolveKey(s.Stream, scopeOrDefault(s.Scope), instanceID)
 			emitKey := ResolveKey(s.Emit, "shared", instanceID)
 			emitEdge[consumeKey] = emitKey
 		}
@@ -345,10 +347,10 @@ func detectEmitCycles(streams []StreamBinding, instanceID string) error {
 		visiting  = 1
 		visited   = 2
 	)
-	state := make(map[node]int, len(streams))
+	state := make(map[string]int, len(streams))
 
-	var dfs func(n node) error
-	dfs = func(n node) error {
+	var dfs func(n string) error
+	dfs = func(n string) error {
 		switch state[n] {
 		case visiting:
 			return fmt.Errorf("stream %q: %w", n, ErrEmitCycle)
@@ -366,11 +368,7 @@ func detectEmitCycles(streams []StreamBinding, instanceID string) error {
 	}
 
 	for _, s := range streams {
-		scope := s.Scope
-		if scope == "" {
-			scope = "instance"
-		}
-		consumeKey := ResolveKey(s.Stream, scope, instanceID)
+		consumeKey := ResolveKey(s.Stream, scopeOrDefault(s.Scope), instanceID)
 		if state[consumeKey] == unvisited {
 			if err := dfs(consumeKey); err != nil {
 				return err

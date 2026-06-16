@@ -48,6 +48,7 @@ instances:
     streams:
       # PURE TRANSFORM: enrich + emit, no handler.
       # Reads cdc.user_role_grant, enriches with user email, emits enriched event.
+      # scope: instance (default) — key is "<instanceID>.cdc.user_role_grant".
       - stream: cdc.user_role_grant
         emit: enriched.user_role_grant
         enrich:
@@ -59,6 +60,14 @@ instances:
       # TERMINAL: reads enriched event and runs the side-effect handler.
       - stream: enriched.user_role_grant
         handler: permission-sync
+
+      # BROADCAST / SHARED STREAM: scope: shared means the raw key is used
+      # (no instance prefix). Every instance gets its own consumer group
+      # (group = instanceID), so each instance sees all events — fan-out.
+      # Use for controller/notification streams where every instance must act.
+      # - stream: controller.notifications
+      #   scope: shared
+      #   handler: notification-handler
 
       # ENRICHED TERMINAL: enrich + handler, no emit.
       # - stream: cdc.orders

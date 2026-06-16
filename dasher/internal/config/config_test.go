@@ -288,6 +288,8 @@ func TestResolveKeyInstance(t *testing.T) {
 	assert.Equal(t, "myinst.cdc.orders", config.ResolveKey("cdc.orders", "instance", "myinst"))
 	// Empty scope also defaults to instance.
 	assert.Equal(t, "myinst.cdc.orders", config.ResolveKey("cdc.orders", "", "myinst"))
+	// Unknown scope falls back to instance behaviour (validation rejects it before this is reached).
+	assert.Equal(t, "myinst.cdc.orders", config.ResolveKey("cdc.orders", "typo", "myinst"))
 }
 
 func TestResolveKeyShared(t *testing.T) {

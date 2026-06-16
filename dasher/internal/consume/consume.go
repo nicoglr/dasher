@@ -42,7 +42,7 @@ const (
 type Consumer struct {
 	rdb           *redis.Client
 	stream        string // full key, e.g. "bayer-17909.cdc.orders"
-	group         string // "dasher"
+	group         string // consumer group; equals the instanceID for per-instance cursor isolation
 	name          string // consumer name = process identity (hostname/pod)
 	handler       dasher.Handler
 	inst          dasher.InstanceContext
