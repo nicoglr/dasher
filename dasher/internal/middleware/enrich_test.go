@@ -13,32 +13,6 @@ import (
 	"4gclinical.com/dasher/internal/lookup"
 )
 
-// ---- Fakes ----
-
-type captureHandler struct {
-	called bool
-	last   dasher.Event
-	err    error
-}
-
-func (h *captureHandler) Handle(_ context.Context, _ dasher.InstanceContext, evt dasher.Event) error {
-	h.called = true
-	h.last = evt
-	return h.err
-}
-
-type fakeProducer struct {
-	called bool
-	last   dasher.Event
-	err    error
-}
-
-func (p *fakeProducer) Emit(_ context.Context, _ string, evt dasher.Event) error {
-	p.called = true
-	p.last = evt
-	return p.err
-}
-
 func makeRunner(rows []lookup.Row, runErr error) *lookup.Runner {
 	fl := &fakeLookup{rows: rows, err: runErr}
 	rule := lookup.EnrichRule{
@@ -57,15 +31,6 @@ type fakeLookup struct {
 
 func (f *fakeLookup) Resolve(_ context.Context, _ map[string]any) ([]lookup.Row, error) {
 	return f.rows, f.err
-}
-
-func baseEvent() dasher.Event {
-	return dasher.Event{
-		Op:    "insert",
-		Table: "users",
-		LSN:   "0/1",
-		Data:  map[string]any{"id": "alice"},
-	}
 }
 
 // ---- Enrich tests ----
@@ -122,40 +87,6 @@ func TestEnrich_TransientError_Returned(t *testing.T) {
 	assert.False(t, inner.called)
 }
 
-// ---- EmitAfter tests ----
-
-func TestEmitAfter_InnerSuccess_Emits(t *testing.T) {
-	inner := &captureHandler{}
-	prod := &fakeProducer{}
-	h := middleware.EmitAfter(prod, "downstream", inner)
-
-	evt := baseEvent()
-	err := h.Handle(context.Background(), dasher.InstanceContext{}, evt)
-	require.NoError(t, err)
-	assert.True(t, inner.called)
-	assert.True(t, prod.called)
-}
-
-func TestEmitAfter_InnerError_NoEmit(t *testing.T) {
-	inner := &captureHandler{err: errors.New("side effect failed")}
-	prod := &fakeProducer{}
-	h := middleware.EmitAfter(prod, "downstream", inner)
-
-	err := h.Handle(context.Background(), dasher.InstanceContext{}, baseEvent())
-	require.Error(t, err)
-	assert.False(t, prod.called)
-}
-
-func TestEmitAfter_ProducerError_Returned(t *testing.T) {
-	inner := &captureHandler{}
-	prod := &fakeProducer{err: errors.New("redis down")}
-	h := middleware.EmitAfter(prod, "downstream", inner)
-
-	err := h.Handle(context.Background(), dasher.InstanceContext{}, baseEvent())
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "redis down")
-}
-
 // ---- Composed: Enrich(EmitAfter(Noop)) = pure transform ----
 
 func TestComposed_PureTransform_EmitsWithEnrichment(t *testing.T) {
@@ -168,4 +99,3 @@ func TestComposed_PureTransform_EmitsWithEnrichment(t *testing.T) {
 	require.True(t, prod.called)
 	assert.Equal(t, lookup.Row{"email": "alice@example.com"}, prod.last.Enrichment["user"])
 }
-
