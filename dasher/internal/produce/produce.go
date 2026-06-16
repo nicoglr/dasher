@@ -1,5 +1,6 @@
 // Package produce implements dasher.Producer over Redis XADD.
-// It serialises an Event and publishes it to "<instanceID>.<stream>".
+// It serialises an Event and publishes it to the raw stream key (no instance prefix).
+// Origin is recorded in the envelope "source" field.
 // There is NO internal retry — the caller (consume loop) owns retry/escalation.
 package produce
 
@@ -22,7 +23,8 @@ type Producer struct {
 	closed     atomic.Bool
 }
 
-// New returns a Producer that prefixes every stream with "<instanceID>.".
+// New returns a Producer that publishes to the raw stream key (no instance prefix)
+// and stamps every envelope with the instanceID as "source".
 func New(client *redis.Client, instanceID string) *Producer {
 	return &Producer{client: client, instanceID: instanceID}
 }
@@ -34,7 +36,8 @@ func (p *Producer) Close() {
 	p.closed.Store(true)
 }
 
-// Emit publishes evt to "<instanceID>.<stream>" via a single ctx-bound XADD.
+// Emit publishes evt to the raw stream key via a single ctx-bound XADD, stamping
+// "source" with the instanceID so downstream can identify the origin instance.
 // Returns an error if the producer has been closed, or the raw Redis error on
 // failure — no internal retry.
 func (p *Producer) Emit(ctx context.Context, stream string, evt dasher.Event) error {
@@ -42,7 +45,7 @@ func (p *Producer) Emit(ctx context.Context, stream string, evt dasher.Event) er
 		return fmt.Errorf("produce: emit after close")
 	}
 
-	key := p.instanceID + "." + stream
+	key := stream
 
 	fields := map[string]any{
 		"op":          evt.Op,
@@ -50,6 +53,7 @@ func (p *Producer) Emit(ctx context.Context, stream string, evt dasher.Event) er
 		"schema":      evt.Schema,
 		"lsn":         evt.LSN,
 		"streamed_at": evt.StreamedAt.UTC().Format(time.RFC3339),
+		"source":      p.instanceID,
 	}
 
 	dataBytes, err := json.Marshal(evt.Data)

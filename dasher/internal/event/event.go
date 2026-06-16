@@ -51,6 +51,11 @@ func Parse(id string, values map[string]any) (dasher.Event, error) {
 	if e.Data, err = decodeJSON(dataStr); err != nil {
 		return e, fmt.Errorf("data: %w", err)
 	}
+	if raw, ok := values["source"]; ok {
+		if s, ok := raw.(string); ok {
+			e.Source = s
+		}
+	}
 	if raw, ok := values["old"]; ok {
 		if s, ok := raw.(string); ok && s != "" {
 			if e.Old, err = decodeJSON(s); err != nil {

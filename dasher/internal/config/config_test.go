@@ -28,7 +28,7 @@ func TestLoadSelectsInstance(t *testing.T) {
 	assert.Equal(t, "order-sync@v1", cfg.Instance.Streams[0].Handler)
 	assert.Equal(t, "cdc.orders", cfg.Instance.Streams[0].Stream)
 	assert.Equal(t, "DASHER_TEST_INTERNAL_URL", cfg.Instance.Services.Internal.URLEnv)
-	assert.Equal(t, "dasher", cfg.Group)
+	assert.Equal(t, "bayer-17909", cfg.Group)
 	assert.NotEmpty(t, cfg.Consumer)
 	assert.Equal(t, 10, cfg.EscalateAfter)
 	assert.Equal(t, "localhost:6379", cfg.RedisAddr)
@@ -280,5 +280,32 @@ func TestHeartbeatIntervalTooLarge(t *testing.T) {
 	t.Setenv("DASHER_HEARTBEAT_INTERVAL", "20s")
 	_, err := config.Load()
 	require.ErrorIs(t, err, config.ErrHeartbeatIntervalTooLarge)
+}
+
+// --- Scope / key resolution tests ---
+
+func TestResolveKeyInstance(t *testing.T) {
+	assert.Equal(t, "myinst.cdc.orders", config.ResolveKey("cdc.orders", "instance", "myinst"))
+	// Empty scope also defaults to instance.
+	assert.Equal(t, "myinst.cdc.orders", config.ResolveKey("cdc.orders", "", "myinst"))
+}
+
+func TestResolveKeyShared(t *testing.T) {
+	assert.Equal(t, "cdc.orders", config.ResolveKey("cdc.orders", "shared", "myinst"))
+}
+
+func TestLoadBadStreamScope(t *testing.T) {
+	// bad-stream-scope-99972 has scope: bogus on a stream binding.
+	setEnv(t, "bad-stream-scope-99972")
+	_, err := config.Load()
+	require.ErrorIs(t, err, config.ErrBadStreamScope)
+}
+
+func TestLoadInstanceScopeNoSelfLoop(t *testing.T) {
+	// instance-scoped consume + shared emit with the same logical name is NOT
+	// a self-loop (resolved keys differ: "<inst>.cdc.orders" vs "cdc.orders").
+	setEnv(t, "instance-scope-no-selfloop-99971")
+	_, err := config.Load()
+	require.NoError(t, err)
 }
 

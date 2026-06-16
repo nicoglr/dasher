@@ -78,7 +78,7 @@ func main() {
 			slog.Error("build handler", "stream", b.Stream, "err", err)
 			os.Exit(1)
 		}
-		key := cfg.InstanceID + "." + b.Stream
+		key := config.ResolveKey(b.Stream, b.Scope, cfg.InstanceID)
 		c := consume.New(rdb, key, cfg.Group, cfg.Consumer, h, inst, policy, cfg.EscalateAfter,
 			consume.WithReclaimMinIdle(cfg.ReclaimMinIdle),
 			consume.WithReclaimInterval(cfg.ReclaimInterval),

@@ -48,7 +48,7 @@ func TestEmitWritesEnvelope(t *testing.T) {
 	// Read back from miniredis
 	client := redis.NewClient(&redis.Options{Addr: mr.Addr()})
 	defer client.Close()
-	msgs, err := client.XRange(ctx, "test-instance.events", "-", "+").Result()
+	msgs, err := client.XRange(ctx, "events", "-", "+").Result()
 	require.NoError(t, err)
 	require.Len(t, msgs, 1)
 
@@ -61,6 +61,7 @@ func TestEmitWritesEnvelope(t *testing.T) {
 	assert.Contains(t, v["data"], "alice@example.com")
 	assert.Contains(t, v["old"], `"id"`)
 	assert.Contains(t, v["enrichment"], "admin")
+	assert.Equal(t, "test-instance", v["source"])
 }
 
 func TestEmitOmitsEmptyOldAndEnrichment(t *testing.T) {
@@ -72,7 +73,8 @@ func TestEmitOmitsEmptyOldAndEnrichment(t *testing.T) {
 
 	client := redis.NewClient(&redis.Options{Addr: mr.Addr()})
 	defer client.Close()
-	msgs, _ := client.XRange(ctx, "test-instance.events", "-", "+").Result()
+	msgs, err := client.XRange(ctx, "events", "-", "+").Result()
+	require.NoError(t, err)
 	require.Len(t, msgs, 1)
 	_, hasOld := msgs[0].Values["old"]
 	_, hasEnrichment := msgs[0].Values["enrichment"]
@@ -97,7 +99,7 @@ func TestEmitAfterCloseDoesNotPublish(t *testing.T) {
 
 	client := redis.NewClient(&redis.Options{Addr: mr.Addr()})
 	defer client.Close()
-	msgs, err := client.XRange(context.Background(), "test-instance.events", "-", "+").Result()
+	msgs, err := client.XRange(context.Background(), "events", "-", "+").Result()
 	require.NoError(t, err)
 	assert.Empty(t, msgs, "no message should be published after Close")
 }

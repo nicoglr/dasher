@@ -38,7 +38,7 @@ func TestEndToEnd_CDCEnrichEmit(t *testing.T) {
 		instanceID  = "test-instance"
 		srcStream   = "cdc.users"
 		dstStream   = "enriched.users"
-		consumerGrp = "dasher"
+		consumerGrp = instanceID // group = instanceID per new semantics
 		consumerID  = "test-consumer"
 		lsn         = "0/ABCDEF"
 	)
@@ -101,12 +101,12 @@ func TestEndToEnd_CDCEnrichEmit(t *testing.T) {
 	done := make(chan error, 1)
 	go func() { done <- consumer.Run(ctx) }()
 
-	// Poll the enriched stream until the entry appears.
+	// Poll the enriched stream (raw key — emit is always global).
 	var enrichedID string
 	var enrichedValues map[string]interface{}
 	deadline := time.Now().Add(4 * time.Second)
 	for time.Now().Before(deadline) {
-		msgs, err := rdb.XRange(context.Background(), instanceID+"."+dstStream, "-", "+").Result()
+		msgs, err := rdb.XRange(context.Background(), dstStream, "-", "+").Result()
 		if err == nil && len(msgs) > 0 {
 			enrichedID = msgs[0].ID
 			enrichedValues = msgs[0].Values
@@ -133,6 +133,9 @@ func TestEndToEnd_CDCEnrichEmit(t *testing.T) {
 	user, ok := enrichment["user"].(map[string]any)
 	require.True(t, ok, "enrichment.user should be a map")
 	assert.Equal(t, "alice@example.com", user["email"])
+
+	// Assert source field is set by the producer.
+	assert.Equal(t, instanceID, enrichedValues["source"], "source must be the emitting instance ID")
 
 	// Assert event.Parse can round-trip the emitted entry (field-name drift check).
 	evtOut, err := event.Parse(fmt.Sprintf("%s-parsed", enrichedID), enrichedValues)

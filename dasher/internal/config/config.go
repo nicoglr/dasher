@@ -46,6 +46,7 @@ type EnrichRuleConfig struct {
 // set. Enrich alone is invalid.
 type StreamBinding struct {
 	Stream  string             `yaml:"stream"`
+	Scope   string             `yaml:"scope"` // "instance" (default) or "shared"
 	Handler string             `yaml:"handler"`
 	Emit    string             `yaml:"emit"`
 	Enrich  []EnrichRuleConfig `yaml:"enrich"`
@@ -82,6 +83,7 @@ var (
 	ErrMissingStreamName = errors.New("stream binding missing stream name")
 	ErrBadEscalateAfter  = errors.New("DASHER_ESCALATE_AFTER must be a positive integer")
 	ErrEmptyBinding      = errors.New("stream binding must have at least one of handler or emit")
+	ErrBadStreamScope    = errors.New("stream scope must be \"instance\" or \"shared\"")
 	ErrSelfEmit          = errors.New("emit must not point to the same stream")
 	// ErrEmitCycle is returned when a DFS back-edge walk detects a genuine
 	// cycle in the emit graph (A → B → … → A). A valid two-stage enrichment
@@ -117,7 +119,7 @@ type file struct {
 type Config struct {
 	InstanceID    string
 	RedisAddr     string
-	Group         string // consumer group name, always "dasher" in v0
+	Group         string // consumer group name = instanceID (gives each instance its own cursor)
 	Consumer      string // consumer name = process identity (hostname)
 	EscalateAfter int    // consecutive transient retries before WARN→ERROR escalation
 	Instance      InstanceConfig
@@ -211,7 +213,7 @@ func Load() (Config, error) {
 	return Config{
 		InstanceID:         instanceID,
 		RedisAddr:          getenv("DASHER_REDIS_ADDR", "localhost:6379"),
-		Group:              "dasher",
+		Group:              instanceID,
 		Consumer:           consumer,
 		EscalateAfter:      escalate,
 		Instance:           inst,
@@ -264,13 +266,25 @@ func validateInstance(inst InstanceConfig) error {
 		if s.Stream == "" {
 			return ErrMissingStreamName
 		}
+		// Validate scope (empty defaults to "instance").
+		scope := s.Scope
+		if scope == "" {
+			scope = "instance"
+		}
+		if scope != "instance" && scope != "shared" {
+			return fmt.Errorf("stream %q: %w %q", s.Stream, ErrBadStreamScope, s.Scope)
+		}
 		// At least one of handler or emit must be set.
 		if s.Handler == "" && s.Emit == "" {
 			return fmt.Errorf("stream %q: %w", s.Stream, ErrEmptyBinding)
 		}
-		// Emit must not equal stream (self-loop).
-		if s.Emit != "" && s.Emit == s.Stream {
-			return fmt.Errorf("stream %q: %w", s.Stream, ErrSelfEmit)
+		// Self-loop check in resolved-key space.
+		if s.Emit != "" {
+			consumeKey := ResolveKey(s.Stream, scope, inst.ID)
+			emitKey := ResolveKey(s.Emit, "shared", inst.ID)
+			if consumeKey == emitKey {
+				return fmt.Errorf("stream %q: %w", s.Stream, ErrSelfEmit)
+			}
 		}
 		// Validate enrich rules.
 		for _, rule := range s.Enrich {
@@ -286,22 +300,43 @@ func validateInstance(inst InstanceConfig) error {
 	}
 
 	// Detect genuine cycles in the emit graph via DFS back-edge walk.
-	if err := detectEmitCycles(inst.Streams); err != nil {
+	if err := detectEmitCycles(inst.Streams, inst.ID); err != nil {
 		return err
 	}
 
 	return nil
 }
 
-// detectEmitCycles performs a DFS back-edge walk on the emit graph.
+// ResolveKey returns the Redis stream key for a logical stream name.
+// scope "instance" (or empty) → "<instanceID>.<name>".
+// scope "shared" → "<name>" (raw key; no prefix).
+// Emit is always resolved as "shared".
+func ResolveKey(name, scope, instanceID string) string {
+	if scope == "shared" {
+		return name
+	}
+	return instanceID + "." + name
+}
+
+// detectEmitCycles performs a DFS back-edge walk on the emit graph in
+// resolved-key space (consume key vs shared emit key).
 // A → B where B is terminal (no further emit) is valid.
 // A → B → … → A is a genuine cycle and returns ErrEmitCycle.
-func detectEmitCycles(streams []StreamBinding) error {
-	// Build adjacency: stream → emit target (only if non-empty).
-	emitEdge := make(map[string]string, len(streams))
+func detectEmitCycles(streams []StreamBinding, instanceID string) error {
+	// Normalize scope and build adjacency in resolved-key space.
+	// consume node = ResolveKey(stream, scope, id)
+	// emit edge target = ResolveKey(emit, "shared", id)
+	type node = string
+	emitEdge := make(map[node]node, len(streams))
 	for _, s := range streams {
 		if s.Emit != "" {
-			emitEdge[s.Stream] = s.Emit
+			scope := s.Scope
+			if scope == "" {
+				scope = "instance"
+			}
+			consumeKey := ResolveKey(s.Stream, scope, instanceID)
+			emitKey := ResolveKey(s.Emit, "shared", instanceID)
+			emitEdge[consumeKey] = emitKey
 		}
 	}
 
@@ -310,29 +345,34 @@ func detectEmitCycles(streams []StreamBinding) error {
 		visiting  = 1
 		visited   = 2
 	)
-	state := make(map[string]int, len(streams))
+	state := make(map[node]int, len(streams))
 
-	var dfs func(node string) error
-	dfs = func(node string) error {
-		switch state[node] {
+	var dfs func(n node) error
+	dfs = func(n node) error {
+		switch state[n] {
 		case visiting:
-			return fmt.Errorf("stream %q: %w", node, ErrEmitCycle)
+			return fmt.Errorf("stream %q: %w", n, ErrEmitCycle)
 		case visited:
 			return nil
 		}
-		state[node] = visiting
-		if next, ok := emitEdge[node]; ok {
+		state[n] = visiting
+		if next, ok := emitEdge[n]; ok {
 			if err := dfs(next); err != nil {
 				return err
 			}
 		}
-		state[node] = visited
+		state[n] = visited
 		return nil
 	}
 
 	for _, s := range streams {
-		if state[s.Stream] == unvisited {
-			if err := dfs(s.Stream); err != nil {
+		scope := s.Scope
+		if scope == "" {
+			scope = "instance"
+		}
+		consumeKey := ResolveKey(s.Stream, scope, instanceID)
+		if state[consumeKey] == unvisited {
+			if err := dfs(consumeKey); err != nil {
 				return err
 			}
 		}

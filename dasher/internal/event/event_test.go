@@ -76,3 +76,18 @@ func TestParseNoEnrichmentIsNil(t *testing.T) {
 	require.NoError(t, err)
 	assert.Nil(t, evt.Enrichment)
 }
+
+func TestParseWithSource(t *testing.T) {
+	v := base()
+	v["source"] = "my-instance"
+	evt, err := event.Parse("7-0", v)
+	require.NoError(t, err)
+	assert.Equal(t, "my-instance", evt.Source)
+}
+
+func TestParseSourceAbsentIsEmpty(t *testing.T) {
+	// WALker-produced entries do not carry a source field — must be tolerated.
+	vt, err := event.Parse("8-0", base())
+	require.NoError(t, err)
+	assert.Empty(t, vt.Source)
+}
