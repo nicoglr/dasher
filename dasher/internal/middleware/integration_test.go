@@ -1,7 +1,7 @@
 // Package enrich_test — end-to-end integration test covering the full
 // cdc → enrich → enriched pipeline via a real consume.Consumer and real
 // produce.Producer, with miniredis as the stream backend.
-package enrich_test
+package middleware_test
 
 import (
 	"context"
@@ -18,7 +18,7 @@ import (
 
 	"4gclinical.com/dasher"
 	"4gclinical.com/dasher/internal/consume"
-	"4gclinical.com/dasher/internal/enrich"
+	"4gclinical.com/dasher/internal/middleware"
 	"4gclinical.com/dasher/internal/event"
 	"4gclinical.com/dasher/internal/lookup"
 	"4gclinical.com/dasher/internal/produce"
@@ -78,7 +78,7 @@ func TestEndToEnd_CDCEnrichEmit(t *testing.T) {
 	}
 	runner := lookup.NewRunner([]lookup.EnrichRule{rule})
 	producer := produce.New(rdb, instanceID)
-	handler := enrich.Enrich(runner, enrich.EmitAfter(producer, dstStream, dasher.Noop))
+	handler := middleware.Enrich(runner, middleware.EmitAfter(producer, dstStream, dasher.Noop))
 
 	inst := dasher.InstanceContext{ID: instanceID}
 	policy := dasher.FailLoud{}

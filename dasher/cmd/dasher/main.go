@@ -15,7 +15,7 @@ import (
 	"4gclinical.com/dasher"
 	"4gclinical.com/dasher/internal/config"
 	"4gclinical.com/dasher/internal/consume"
-	"4gclinical.com/dasher/internal/enrich"
+	"4gclinical.com/dasher/internal/middleware"
 	"4gclinical.com/dasher/internal/lookup"
 	"4gclinical.com/dasher/internal/produce"
 	"4gclinical.com/dasher/internal/registry"
@@ -180,7 +180,7 @@ func buildHandler(
 
 	// EmitAfter wraps the base handler (inner-to-outer: emit happens after base).
 	if b.Emit != "" {
-		h = enrich.EmitAfter(producer, b.Emit, h)
+		h = middleware.EmitAfter(producer, b.Emit, h)
 	}
 
 	// Enrich wraps everything (outermost: enrichment happens first).
@@ -199,7 +199,7 @@ func buildHandler(
 			})
 		}
 		runner := lookup.NewRunner(rules)
-		h = enrich.Enrich(runner, h)
+		h = middleware.Enrich(runner, h)
 	}
 
 	return h, nil

@@ -1,4 +1,4 @@
-package enrich_test
+package middleware_test
 
 import (
 	"context"
@@ -9,7 +9,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"4gclinical.com/dasher"
-	"4gclinical.com/dasher/internal/enrich"
+	"4gclinical.com/dasher/internal/middleware"
 	"4gclinical.com/dasher/internal/lookup"
 )
 
@@ -73,7 +73,7 @@ func baseEvent() dasher.Event {
 func TestEnrich_MergesEnrichmentOntoEvent(t *testing.T) {
 	runner := makeRunner([]lookup.Row{{"email": "alice@example.com"}}, nil)
 	inner := &captureHandler{}
-	h := enrich.Enrich(runner, inner)
+	h := middleware.Enrich(runner, inner)
 
 	err := h.Handle(context.Background(), dasher.InstanceContext{}, baseEvent())
 	require.NoError(t, err)
@@ -96,7 +96,7 @@ func TestEnrich_RunnerPoison_InnerNotCalled(t *testing.T) {
 	}
 	runner := lookup.NewRunner([]lookup.EnrichRule{rule})
 	inner := &captureHandler{}
-	h := enrich.Enrich(runner, inner)
+	h := middleware.Enrich(runner, inner)
 
 	err := h.Handle(context.Background(), dasher.InstanceContext{}, baseEvent())
 	require.Error(t, err)
@@ -114,7 +114,7 @@ func TestEnrich_TransientError_Returned(t *testing.T) {
 	}
 	runner := lookup.NewRunner([]lookup.EnrichRule{rule})
 	inner := &captureHandler{}
-	h := enrich.Enrich(runner, inner)
+	h := middleware.Enrich(runner, inner)
 
 	err := h.Handle(context.Background(), dasher.InstanceContext{}, baseEvent())
 	require.Error(t, err)
@@ -127,7 +127,7 @@ func TestEnrich_TransientError_Returned(t *testing.T) {
 func TestEmitAfter_InnerSuccess_Emits(t *testing.T) {
 	inner := &captureHandler{}
 	prod := &fakeProducer{}
-	h := enrich.EmitAfter(prod, "downstream", inner)
+	h := middleware.EmitAfter(prod, "downstream", inner)
 
 	evt := baseEvent()
 	err := h.Handle(context.Background(), dasher.InstanceContext{}, evt)
@@ -139,7 +139,7 @@ func TestEmitAfter_InnerSuccess_Emits(t *testing.T) {
 func TestEmitAfter_InnerError_NoEmit(t *testing.T) {
 	inner := &captureHandler{err: errors.New("side effect failed")}
 	prod := &fakeProducer{}
-	h := enrich.EmitAfter(prod, "downstream", inner)
+	h := middleware.EmitAfter(prod, "downstream", inner)
 
 	err := h.Handle(context.Background(), dasher.InstanceContext{}, baseEvent())
 	require.Error(t, err)
@@ -149,7 +149,7 @@ func TestEmitAfter_InnerError_NoEmit(t *testing.T) {
 func TestEmitAfter_ProducerError_Returned(t *testing.T) {
 	inner := &captureHandler{}
 	prod := &fakeProducer{err: errors.New("redis down")}
-	h := enrich.EmitAfter(prod, "downstream", inner)
+	h := middleware.EmitAfter(prod, "downstream", inner)
 
 	err := h.Handle(context.Background(), dasher.InstanceContext{}, baseEvent())
 	require.Error(t, err)
@@ -161,10 +161,11 @@ func TestEmitAfter_ProducerError_Returned(t *testing.T) {
 func TestComposed_PureTransform_EmitsWithEnrichment(t *testing.T) {
 	runner := makeRunner([]lookup.Row{{"email": "alice@example.com"}}, nil)
 	prod := &fakeProducer{}
-	h := enrich.Enrich(runner, enrich.EmitAfter(prod, "enriched.users", dasher.Noop))
+	h := middleware.Enrich(runner, middleware.EmitAfter(prod, "enriched.users", dasher.Noop))
 
 	err := h.Handle(context.Background(), dasher.InstanceContext{}, baseEvent())
 	require.NoError(t, err)
 	require.True(t, prod.called)
 	assert.Equal(t, lookup.Row{"email": "alice@example.com"}, prod.last.Enrichment["user"])
 }
+

@@ -1,8 +1,7 @@
-// Package enrich provides handler-middleware for CDC event enrichment.
-// Enrich populates Event.Enrichment via lookup.Runner before calling the inner
-// handler. EmitAfter publishes the event downstream after the inner handler
-// succeeds.
-package enrich
+// Package middleware provides Handler-middleware for the CDC pipeline.
+// Each function wraps an inner Handler and returns a new Handler, following
+// the (...inner Handler) Handler decorator pattern.
+package middleware
 
 import (
 	"context"
@@ -29,17 +28,5 @@ func Enrich(runner *lookup.Runner, inner dasher.Handler) dasher.Handler {
 		}
 		evt.Enrichment = enr
 		return inner.Handle(ctx, inst, evt)
-	})
-}
-
-// EmitAfter returns a Handler that calls inner first; if inner succeeds, it
-// emits the event to the downstream stream via prod. If inner fails, the emit
-// is skipped and the error is returned.
-func EmitAfter(prod dasher.Producer, stream string, inner dasher.Handler) dasher.Handler {
-	return dasher.HandlerFunc(func(ctx context.Context, inst dasher.InstanceContext, evt dasher.Event) error {
-		if err := inner.Handle(ctx, inst, evt); err != nil {
-			return err
-		}
-		return prod.Emit(ctx, stream, evt)
 	})
 }
