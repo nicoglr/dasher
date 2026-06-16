@@ -77,6 +77,9 @@ cmd/dasher/main.go      wiring: load config, build Services, start consume loops
 internal/config         YAML + env load, instance selection, validation
 internal/consume        XAUTOCLAIM reclaim, XREADGROUP loop, XACK, retry/backoff
 internal/event          parse stream entry → Event (UseNumber for numeric precision)
+internal/lookup         enrichment query execution (ErrPoison on miss/multi-row)
+internal/middleware     Handler decorators: Enrich (populate Event.Enrichment) + EmitAfter (XADD downstream)
+internal/produce        Redis stream producer (XADD)
 internal/registry       name → Handler map (wazero seam for future hot-swap)
 internal/services       authenticated HTTP clients (internal: static token; gateway: JWT)
 internal/handlers       concrete handlers (order-sync, product-sync, …)
