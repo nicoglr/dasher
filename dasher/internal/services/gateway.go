@@ -1,6 +1,7 @@
 package services
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/json"
@@ -74,7 +75,7 @@ func (c *GatewayClient) authenticate(ctx context.Context) error {
 	}
 	authCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
-	req, err := http.NewRequestWithContext(authCtx, http.MethodPost, c.authURL, strings.NewReader(string(body)))
+	req, err := http.NewRequestWithContext(authCtx, http.MethodPost, c.authURL, bytes.NewReader(body))
 	if err != nil {
 		return err
 	}
@@ -121,13 +122,13 @@ func jwtExpiry(token string) (time.Time, error) {
 		return time.Time{}, fmt.Errorf("decode JWT payload: %w", err)
 	}
 	var claims struct {
-		Exp int64 `json:"exp"`
+		Exp *int64 `json:"exp"`
 	}
 	if err := json.Unmarshal(payload, &claims); err != nil {
 		return time.Time{}, fmt.Errorf("parse JWT claims: %w", err)
 	}
-	if claims.Exp == 0 {
+	if claims.Exp == nil {
 		return time.Time{}, fmt.Errorf("JWT missing exp claim")
 	}
-	return time.Unix(claims.Exp, 0), nil
+	return time.Unix(*claims.Exp, 0), nil
 }

@@ -123,9 +123,11 @@ func TestGatewayLoginNon2xxReturnsError(t *testing.T) {
 	require.Error(t, err)
 }
 
-func TestGatewayConcurrentDoCoalescesLogin(t *testing.T) {
+func TestGatewayConcurrentDoNoDataRace(t *testing.T) {
 	var loginCalls atomic.Int32
-	// Token always near-expiry to force re-auth race.
+	// Token always near-expiry (30s < 60s buffer) so every goroutine that acquires
+	// the lock will attempt a re-auth. The test verifies no data race occurs and
+	// all requests succeed; it does not assert a specific login count.
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/api/auth/api_login/" {
 			loginCalls.Add(1)

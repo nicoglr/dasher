@@ -28,6 +28,22 @@ const (
 	ServiceGateway
 )
 
+// selectClient maps svc to the corresponding client on inst, returning nil
+// (not an interface holding a typed nil) when that service is not configured.
+func selectClient(inst dasher.InstanceContext, svc Service) httpDoer {
+	switch svc {
+	case ServiceInternal:
+		if inst.Services.Internal != nil {
+			return inst.Services.Internal
+		}
+	case ServiceGateway:
+		if inst.Services.Gateway != nil {
+			return inst.Services.Gateway
+		}
+	}
+	return nil
+}
+
 // Forward returns a HandlerFunc that forwards events through the named service.
 // Returns nil when the selected service is not configured (no-op).
 func Forward(svc Service) dasher.HandlerFunc {
@@ -35,17 +51,7 @@ func Forward(svc Service) dasher.HandlerFunc {
 		slog.Info("handling event",
 			"instance", inst.ID, "table", evt.Table, "op", evt.Op, "lsn", evt.LSN)
 
-		var client httpDoer
-		switch svc {
-		case ServiceInternal:
-			if inst.Services.Internal != nil {
-				client = inst.Services.Internal
-			}
-		case ServiceGateway:
-			if inst.Services.Gateway != nil {
-				client = inst.Services.Gateway
-			}
-		}
+		client := selectClient(inst, svc)
 
 		if client == nil {
 			return nil
